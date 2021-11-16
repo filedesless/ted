@@ -2,7 +2,6 @@ use buffer::{Buffer, Mode};
 use command::Commands;
 use nonempty::NonEmpty;
 use std::io;
-use std::path::Path;
 use termion::event::Key;
 use termion::raw::RawTerminal;
 use termion::screen::AlternateScreen;
