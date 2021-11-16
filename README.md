@@ -10,6 +10,10 @@ Ted is a Text Editor.
 
     cargo run
 
+## Test
+
+    cargo test
+
 ## Install
 
     cargo install

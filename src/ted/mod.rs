@@ -164,13 +164,13 @@ impl Ted {
 
     pub fn file_open(&mut self, filepath: String) {
         let _ = self.term.clear();
-        let message = match Buffer::from_file(filepath) {
+        let message = match Buffer::from_file(&filepath) {
             Ok(buffer) => {
                 let message = format!("Created new buffer <{}>", buffer.name);
                 self.buffers.insert(0, buffer);
                 message
             },
-            Err(err) => err.to_string(),
+            Err(err) => format!("file_open({}): {}", filepath, err.to_string()),
         };
         self.minibuffer.set_current_line(message);
     }
@@ -266,12 +266,12 @@ impl Ted {
             match key {
                 Key::Char('\n') => {
                     let line = self.minibuffer.get_current_line().to_string();
-                    if let Some(f) = self.prompt_callback {
-                        f(self, line);
-                    }
                     self.normal_mode();
                     self.prompt = String::default();
-                    self.prompt_callback = None;
+                    if let Some(f) = self.prompt_callback {
+                        self.prompt_callback = None;
+                        f(self, line);
+                    }
                 }
                 Key::Esc => {
                     self.normal_mode();

@@ -95,7 +95,7 @@ impl Buffer {
         }
     }
 
-    pub fn from_file(path: String) -> io::Result<Self> {
+    pub fn from_file(path: &String) -> io::Result<Self> {
         let p = Path::new(&path);
         let name = if let Some(stem) = p.file_stem() {
             stem.to_string_lossy().to_string()
@@ -110,7 +110,7 @@ impl Buffer {
             (String::default(), epoch)
         };
         let mut buffer = Buffer::new(content, name);
-        buffer.file = Some(BackendFile { path, modified });
+        buffer.file = Some(BackendFile { path: path.to_string(), modified });
         Ok(buffer)
     }
 

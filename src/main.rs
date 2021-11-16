@@ -25,7 +25,7 @@ fn run() -> Result<(), io::Error> {
     let mut ted = Ted::new(terminal, size.clone());
     ted.init()?;
 
-    for argument in env::args() {
+    for argument in env::args().skip(1) {
         println!("{}", argument);
         ted.file_open(argument);
     }
