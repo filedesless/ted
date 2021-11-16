@@ -2,7 +2,7 @@
 
 Ted is a Text Editor.
 
-![ted](https://i.imgur.com/EJyOZoP.png)
+![ted](https://i.imgur.com/cL0ZUPe.png)
 
 ## Build
 
@@ -18,4 +18,4 @@ Ted is a Text Editor.
 
 ## Install
 
-    cargo install
+    cargo install --path .

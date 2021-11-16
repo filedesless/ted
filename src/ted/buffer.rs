@@ -47,11 +47,11 @@ const HELP: &str = r#"# Welcome to Ted
 - Press SPC q to quit from NORMAL mode.
 - Use "h, j, k, l" keys to move your cursor around in normal mode.
 - Edit text by entering INSERT mode with you "i" key.
+- Press SPC to enter commands by chain.
 
 ## INSERT mode
 
 - Press ESC to go back to normal mode.
-- Press SPC to enter commands by chain.
 
 ## Commands
 
