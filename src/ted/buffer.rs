@@ -1,6 +1,5 @@
 use super::Commands;
 use crate::ted::format_space_chain;
-use nonempty::NonEmpty;
 use std::collections::LinkedList;
 use std::io;
 use std::io::{Error, ErrorKind};
@@ -13,8 +12,8 @@ pub struct Buffer {
     pub mode: Mode,
     pub name: String,
     file: Option<BackendFile>,
-    lines: NonEmpty<String>,
-    linum: usize, // within 0..buffer.len()
+    lines: Vec<String>,
+    linum: usize, // within 0..lines.len()
     col: usize,   // within 0..=line.len()
     changes: LinkedList<Change>,
 }
@@ -79,11 +78,8 @@ impl Default for Buffer {
 
 impl Buffer {
     pub fn new(content: String, name: String) -> Self {
-        let v: Vec<String> = content.lines().map(String::from).collect();
-        let lines = match NonEmpty::from_vec(v) {
-            Some(lines) => lines,
-            None => NonEmpty::new(content),
-        };
+        let lines: Vec<String> = content.lines().map(String::from).collect();
+        let lines = if lines.len() > 0 { lines } else { vec![String::default()] };
         Self {
             mode: Mode::Normal,
             lines,
@@ -110,7 +106,10 @@ impl Buffer {
             (String::default(), epoch)
         };
         let mut buffer = Buffer::new(content, name);
-        buffer.file = Some(BackendFile { path: path.to_string(), modified });
+        buffer.file = Some(BackendFile {
+            path: path.to_string(),
+            modified,
+        });
         Ok(buffer)
     }
 
@@ -129,6 +128,7 @@ impl Buffer {
             file.modified = SystemTime::now();
             Ok(())
         } else {
+            // TODO: ask for a file name to save
             Err(Error::new(ErrorKind::NotFound, "No backend file"))
         }
     }
@@ -141,7 +141,7 @@ impl Buffer {
         &self.changes
     }
 
-    pub fn get_lines(&self) -> &NonEmpty<String> {
+    pub fn get_lines(&self) -> &Vec<String> {
         &self.lines
     }
 
@@ -166,7 +166,7 @@ impl Buffer {
         let line = &mut self.lines[self.linum];
         if self.col <= line.len() {
             line.insert(self.col, c);
-            self.move_cursor_right();
+            self.move_cursor_right(1);
         }
     }
 
@@ -176,27 +176,31 @@ impl Buffer {
 
     pub fn normal_mode(&mut self) {
         self.mode = Mode::Normal;
-        self.move_cursor_left();
+        self.move_cursor_left(1);
     }
 
-    pub fn move_cursor_left(&mut self) {
-        if self.col > 0 {
-            self.move_cursor(self.linum, self.col - 1);
+    pub fn move_cursor_left(&mut self, n: usize) {
+        if self.col > n {
+            self.move_cursor(self.linum, self.col - n);
+        } else {
+            self.move_cursor(self.linum, 0);
         }
     }
 
-    pub fn move_cursor_right(&mut self) {
-        self.move_cursor(self.linum, self.col + 1)
+    pub fn move_cursor_right(&mut self, n: usize) {
+        self.move_cursor(self.linum, self.col + n)
     }
 
-    pub fn move_cursor_up(&mut self) {
-        if self.linum > 0 {
-            self.move_cursor(self.linum - 1, self.col);
+    pub fn move_cursor_up(&mut self, n: usize) {
+        if self.linum >= n {
+            self.move_cursor(self.linum - n, self.col);
+        } else {
+            self.move_cursor(0, self.col);
         }
     }
 
-    pub fn move_cursor_down(&mut self) {
-        self.move_cursor(self.linum + 1, self.col)
+    pub fn move_cursor_down(&mut self, n: usize) {
+        self.move_cursor(self.linum + n, self.col)
     }
 
     pub fn move_cursor_bol(&mut self) {
@@ -223,28 +227,25 @@ impl Buffer {
         for i in self.linum..self.lines.len() {
             self.changes.push_back(Change::ModifiedLine(i))
         }
-        self.move_cursor_down();
+        self.move_cursor_down(1);
         self.move_cursor_bol();
     }
 
-    pub fn del_line(&mut self) {
-        if self.linum > 0 {
-            self.lines.tail.remove(self.linum - 1);
-            if self.lines.len() > 0 {
-                self.linum = self.linum.min(self.lines.len() - 1);
-            }
+    pub fn del_line(&mut self, n: usize) {
+        let u = self.lines.len().min(self.linum + n);
+        let removed_lines = self.lines.drain(self.linum..u).len();
+        if self.lines.len() > 0 {
+            self.linum = self.linum.min(self.lines.len() - 1);
         } else {
-            if let Some(lines) = NonEmpty::from_vec(self.lines.tail.clone()) {
-                self.lines = lines;
-            } else {
-                self.lines = NonEmpty::singleton(String::default());
-            }
+            self.linum = 0;
+            self.lines = vec![String::default()];
         }
         for i in self.linum..self.lines.len() {
             self.changes.push_back(Change::ModifiedLine(i))
         }
-        self.changes
-            .push_back(Change::DeletedLine(self.lines.len()));
+        for i in self.lines.len()..self.lines.len() + removed_lines {
+            self.changes.push_back(Change::DeletedLine(i));
+        }
         self.col = self.col.min(self.get_eol());
     }
 
@@ -252,21 +253,22 @@ impl Buffer {
         self.changes.clear();
     }
 
-    pub fn del_char(&mut self) {
+    pub fn del_char(&mut self, n: usize) {
         let line = &mut self.lines[self.linum];
         if self.col < line.len() {
-            line.remove(self.col);
+            let u = line.len().min(self.col + n);
+            line.drain(self.col..u);
             self.changes.push_back(Change::ModifiedLine(self.linum));
         }
     }
 
     pub fn back_del_char(&mut self) {
         if self.col > 0 {
-            self.move_cursor_left();
-            self.del_char();
+            self.move_cursor_left(1);
+            self.del_char(1);
         } else {
-            self.del_line();
-            self.move_cursor_up();
+            self.del_line(1);
+            self.move_cursor_up(1);
             self.move_cursor_eol();
         }
     }

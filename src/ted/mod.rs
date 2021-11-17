@@ -39,6 +39,7 @@ pub struct Ted {
     space_chain: String,
     commands: Commands,
     prompt_callback: Option<fn(&mut Ted, String)>,
+    universal_argument: Option<usize>,
 }
 
 impl Ted {
@@ -53,6 +54,7 @@ impl Ted {
             space_chain: String::default(),
             commands: Commands::default(),
             prompt_callback: None,
+            universal_argument: None,
         }
     }
 
@@ -169,7 +171,7 @@ impl Ted {
                 let message = format!("Created new buffer <{}>", buffer.name);
                 self.buffers.insert(0, buffer);
                 message
-            },
+            }
             Err(err) => format!("file_open({}): {}", filepath, err.to_string()),
         };
         self.minibuffer.set_current_line(message);
@@ -287,27 +289,15 @@ impl Ted {
             match self.buffers.head.mode {
                 Mode::Normal => {
                     match key {
-                        Key::Char('i') => self.insert_mode(),
-                        Key::Char('I') => {
-                            self.buffers.head.move_cursor_bol();
-                            self.insert_mode();
+                        Key::Char(c) => self.normal_mode_handle_key(c),
+                        Key::Esc => {
+                            self.universal_argument = None;
+                            self.minibuffer.set_current_line("ESC".to_string());
                         }
-                        Key::Char('h') => self.buffers.head.move_cursor_left(),
-                        Key::Char('l') => self.buffers.head.move_cursor_right(),
-                        Key::Char('k') => self.buffers.head.move_cursor_up(),
-                        Key::Char('j') => self.buffers.head.move_cursor_down(),
-                        Key::Char('a') => self.append(),
-                        Key::Char('A') => self.append_to_line(),
-                        Key::Char('H') => self.buffers.head.move_cursor_bol(),
-                        Key::Char('L') => self.buffers.head.move_cursor_eol(),
-                        Key::Char('d') => self.buffers.head.del_line(),
-                        Key::Char('x') => self.buffers.head.del_char(),
-                        Key::Char(' ') => self.space_mode(),
                         _ => {}
                     };
                 }
                 Mode::Insert => {
-                    // self.minibuffer.set_current_line(format!("{:?}", key));
                     match key {
                         Key::Char('\n') => self.buffers.head.new_line(),
                         Key::Backspace => self.buffers.head.back_del_char(),
@@ -322,9 +312,42 @@ impl Ted {
         self.exit
     }
 
+    fn normal_mode_handle_key(&mut self, c: char) {
+        let uarg = self.universal_argument;
+        self.universal_argument = None;
+        let n = uarg.unwrap_or(1);
+        match c {
+            'i' => self.insert_mode(),
+            'I' => {
+                self.buffers.head.move_cursor_bol();
+                self.insert_mode();
+            }
+            'h' => self.buffers.head.move_cursor_left(n),
+            'l' => self.buffers.head.move_cursor_right(n),
+            'k' => self.buffers.head.move_cursor_up(n),
+            'j' => self.buffers.head.move_cursor_down(n),
+            'a' => self.append(),
+            'A' => self.append_to_line(),
+            'H' => self.buffers.head.move_cursor_bol(),
+            'L' => self.buffers.head.move_cursor_eol(),
+            'd' => self.buffers.head.del_line(n),
+            'x' => self.buffers.head.del_char(n),
+            ' ' => self.space_mode(),
+            c if c.is_digit(10) => {
+                let current = uarg.unwrap_or(0);
+                if let Some(u) = c.to_digit(10) {
+                    let x = current * 10 + u as usize;
+                    self.universal_argument = Some(x);
+                    self.minibuffer.set_current_line(format!("C-u: {}", x));
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn append(&mut self) {
         self.insert_mode();
-        self.buffers.head.move_cursor_right();
+        self.buffers.head.move_cursor_right(1);
     }
 
     fn append_to_line(&mut self) {
