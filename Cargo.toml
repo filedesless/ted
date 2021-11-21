@@ -8,4 +8,3 @@ edition = "2018"
 [dependencies]
 tui = "0.16"
 termion = "1.5"
-nonempty = "0.7.0"

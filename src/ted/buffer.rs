@@ -79,7 +79,11 @@ impl Default for Buffer {
 impl Buffer {
     pub fn new(content: String, name: String) -> Self {
         let lines: Vec<String> = content.lines().map(String::from).collect();
-        let lines = if lines.len() > 0 { lines } else { vec![String::default()] };
+        let lines = if lines.len() > 0 {
+            lines
+        } else {
+            vec![String::default()]
+        };
         Self {
             mode: Mode::Normal,
             lines,
@@ -163,10 +167,14 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        let line = &mut self.lines[self.linum];
-        if self.col <= line.len() {
-            line.insert(self.col, c);
-            self.move_cursor_right(1);
+        if c == '\n' {
+            self.new_line();
+        } else {
+            let line = &mut self.lines[self.linum];
+            if self.col <= line.len() {
+                line.insert(self.col, c);
+                self.move_cursor_right(1);
+            }
         }
     }
 
@@ -231,9 +239,9 @@ impl Buffer {
         self.move_cursor_bol();
     }
 
-    pub fn del_line(&mut self, n: usize) {
+    pub fn del_lines(&mut self, n: usize) -> Vec<String> {
         let u = self.lines.len().min(self.linum + n);
-        let removed_lines = self.lines.drain(self.linum..u).len();
+        let removed_lines: Vec<String> = self.lines.drain(self.linum..u).collect();
         if self.lines.len() > 0 {
             self.linum = self.linum.min(self.lines.len() - 1);
         } else {
@@ -243,31 +251,34 @@ impl Buffer {
         for i in self.linum..self.lines.len() {
             self.changes.push_back(Change::ModifiedLine(i))
         }
-        for i in self.lines.len()..self.lines.len() + removed_lines {
+        for i in self.lines.len()..self.lines.len() + removed_lines.len() {
             self.changes.push_back(Change::DeletedLine(i));
         }
         self.col = self.col.min(self.get_eol());
+        removed_lines
     }
 
     pub fn clear_changes(&mut self) {
         self.changes.clear();
     }
 
-    pub fn del_char(&mut self, n: usize) {
+    pub fn del_chars(&mut self, n: usize) -> String {
         let line = &mut self.lines[self.linum];
         if self.col < line.len() {
             let u = line.len().min(self.col + n);
-            line.drain(self.col..u);
+            let chars: String = line.drain(self.col..u).collect();
             self.changes.push_back(Change::ModifiedLine(self.linum));
+            return chars
         }
+        String::default()
     }
 
     pub fn back_del_char(&mut self) {
         if self.col > 0 {
             self.move_cursor_left(1);
-            self.del_char(1);
+            self.del_chars(1);
         } else {
-            self.del_line(1);
+            self.del_lines(1);
             self.move_cursor_up(1);
             self.move_cursor_eol();
         }

@@ -1,6 +1,6 @@
 use buffer::{Buffer, Mode};
 use command::Commands;
-use nonempty::NonEmpty;
+use ring_buffer::RingBuffer;
 use std::io;
 use termion::event::Key;
 use termion::raw::RawTerminal;
@@ -11,6 +11,7 @@ use tui::Terminal;
 
 mod buffer;
 mod command;
+mod ring_buffer;
 
 type TTerm = Terminal<TermionBackend<AlternateScreen<RawTerminal<io::Stdout>>>>;
 // type TTerm = Terminal<TermionBackend<RawTerminal<io::Stdout>>>;
@@ -31,7 +32,7 @@ fn format_space_chain(space_chain: &String) -> String {
 
 pub struct Ted {
     term: TTerm,
-    buffers: NonEmpty<Buffer>,
+    buffers: RingBuffer,
     minibuffer: Buffer,
     exit: bool,
     prompt: String,
@@ -40,13 +41,14 @@ pub struct Ted {
     commands: Commands,
     prompt_callback: Option<fn(&mut Ted, String)>,
     universal_argument: Option<usize>,
+    clipboard: String,
 }
 
 impl Ted {
     pub fn new(terminal: TTerm, termsize: Rect) -> Ted {
         Ted {
             term: terminal,
-            buffers: NonEmpty::singleton(Buffer::default()),
+            buffers: RingBuffer::default(),
             minibuffer: Buffer::empty(),
             exit: false,
             prompt: String::default(),
@@ -55,6 +57,7 @@ impl Ted {
             commands: Commands::default(),
             prompt_callback: None,
             universal_argument: None,
+            clipboard: String::default(),
         }
     }
 
@@ -73,7 +76,7 @@ impl Ted {
         self.termsize = self.term.size()?;
         self.term.hide_cursor()?;
 
-        let buffer = &mut self.buffers.head;
+        let buffer = &mut self.buffers.focused();
 
         // Draw the lines from the buffer
         self.term.set_cursor(0, 0)?;
@@ -151,7 +154,7 @@ impl Ted {
         let _ = self.term.clear();
         let name = format!("Buffer #{}", self.buffers.len() + 1);
         let message = format!("Created new buffer <{}>", name);
-        self.buffers.insert(0, Buffer::new(content, name));
+        self.buffers.new_buffer(Buffer::new(content, name));
         self.minibuffer.set_current_line(String::from(message));
     }
 
@@ -169,7 +172,7 @@ impl Ted {
         let message = match Buffer::from_file(&filepath) {
             Ok(buffer) => {
                 let message = format!("Created new buffer <{}>", buffer.name);
-                self.buffers.insert(0, buffer);
+                self.buffers.new_buffer(buffer);
                 message
             }
             Err(err) => format!("file_open({}): {}", filepath, err.to_string()),
@@ -178,33 +181,27 @@ impl Ted {
     }
 
     fn file_save(&mut self) {
-        let msg = match self.buffers.head.overwrite_backend_file() {
+        let msg = match self.buffers.focused().overwrite_backend_file() {
             Ok(_) => String::from("File saved"),
             Err(e) => e.to_string(),
         };
         self.minibuffer.set_current_line(msg);
     }
 
-    // TODO: clone aaaaaaaaaaaaaaaaa
     fn next_buffer(&mut self) {
         let _ = self.term.clear();
-        let (head, tail) = self.buffers.split_first();
-        let mut v = tail.to_vec();
-        v.push(head.clone());
-        if let Some(n) = NonEmpty::from_vec(v) {
-            self.buffers = n;
-        }
-        let message = format!("Switched to <{}>", self.buffers.head.name);
+        self.buffers.cycle_next();
+        let message = format!("Switched to <{}>", self.buffers.focused().name);
         self.minibuffer.set_current_line(message.to_string());
     }
 
     fn insert_mode(&mut self) {
-        self.buffers.head.insert_mode();
+        self.buffers.focused().insert_mode();
         print!("{}", termion::cursor::SteadyBar);
     }
 
     fn normal_mode(&mut self) {
-        self.buffers.head.normal_mode();
+        self.buffers.focused().normal_mode();
         print!("{}", termion::cursor::SteadyBlock);
     }
 
@@ -286,7 +283,7 @@ impl Ted {
                 _ => {}
             };
         } else {
-            match self.buffers.head.mode {
+            match self.buffers.focused().mode {
                 Mode::Normal => {
                     match key {
                         Key::Char(c) => self.normal_mode_handle_key(c),
@@ -299,11 +296,10 @@ impl Ted {
                 }
                 Mode::Insert => {
                     match key {
-                        Key::Char('\n') => self.buffers.head.new_line(),
-                        Key::Backspace => self.buffers.head.back_del_char(),
+                        Key::Backspace => self.buffers.focused().back_del_char(),
                         Key::Ctrl('c') => self.normal_mode(),
                         Key::Esc => self.normal_mode(),
-                        Key::Char(c) => self.buffers.head.insert_char(c),
+                        Key::Char(c) => self.buffers.focused().insert_char(c),
                         _ => {}
                     };
                 }
@@ -319,19 +315,26 @@ impl Ted {
         match c {
             'i' => self.insert_mode(),
             'I' => {
-                self.buffers.head.move_cursor_bol();
+                self.buffers.focused().move_cursor_bol();
                 self.insert_mode();
             }
-            'h' => self.buffers.head.move_cursor_left(n),
-            'l' => self.buffers.head.move_cursor_right(n),
-            'k' => self.buffers.head.move_cursor_up(n),
-            'j' => self.buffers.head.move_cursor_down(n),
+            'h' => self.buffers.focused().move_cursor_left(n),
+            'l' => self.buffers.focused().move_cursor_right(n),
+            'k' => self.buffers.focused().move_cursor_up(n),
+            'j' => self.buffers.focused().move_cursor_down(n),
             'a' => self.append(),
             'A' => self.append_to_line(),
-            'H' => self.buffers.head.move_cursor_bol(),
-            'L' => self.buffers.head.move_cursor_eol(),
-            'd' => self.buffers.head.del_line(n),
-            'x' => self.buffers.head.del_char(n),
+            'H' => self.buffers.focused().move_cursor_bol(),
+            'L' => self.buffers.focused().move_cursor_eol(),
+            'd' => {
+                self.clipboard = String::default();
+                for line in self.buffers.focused().del_lines(n) {
+                    self.clipboard = format!("{}{}\n", self.clipboard, line);
+                }
+                // self.minibuffer.set_current_line(self.clipboard.to_string());
+            }
+            'x' => self.clipboard = self.buffers.focused().del_chars(n),
+            'p' => self.paste(n),
             ' ' => self.space_mode(),
             c if c.is_digit(10) => {
                 let current = uarg.unwrap_or(0);
@@ -347,11 +350,21 @@ impl Ted {
 
     fn append(&mut self) {
         self.insert_mode();
-        self.buffers.head.move_cursor_right(1);
+        self.buffers.focused().move_cursor_right(1);
     }
 
     fn append_to_line(&mut self) {
-        self.buffers.head.move_cursor_eol();
-        self.append();
+        self.insert_mode();
+        self.buffers.focused().move_cursor_eol();
+    }
+
+    fn paste(&mut self, n: usize) {
+        self.buffers.focused().insert_mode();
+        for _ in 0..n {
+            for c in self.clipboard.chars() {
+                self.buffers.focused().insert_char(c);
+            }
+        }
+        self.buffers.focused().normal_mode();
     }
 }
