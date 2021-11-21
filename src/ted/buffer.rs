@@ -279,7 +279,6 @@ impl Buffer {
             self.del_chars(1);
         } else {
             self.del_lines(1);
-            self.move_cursor_up(1);
             self.move_cursor_eol();
         }
     }
