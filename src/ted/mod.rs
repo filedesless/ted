@@ -2,6 +2,7 @@ use buffer::{Buffer, Mode};
 use command::Commands;
 use ring_buffer::RingBuffer;
 use std::io;
+use termion::color;
 use termion::event::Key;
 use termion::raw::RawTerminal;
 use termion::screen::AlternateScreen;
@@ -78,19 +79,6 @@ impl Ted {
 
         let buffer = &mut self.buffers.focused();
 
-        // Draw the lines from the buffer
-        self.term.set_cursor(0, 0)?;
-        for (i, line) in buffer.get_lines().iter().enumerate() {
-            self.term.set_cursor(0, i as u16)?;
-            let eol = line.len();
-            if line.len() < self.termsize.width as usize {
-                let fill = " ".repeat(self.termsize.width as usize - line.len());
-                println!("{}{}", line[0..eol].to_string(), fill);
-            } else {
-                println!("{}", line[0..eol].to_string());
-            }
-        }
-
         // Update tracked changes
         for change in buffer.get_changes() {
             match change {
@@ -111,7 +99,31 @@ impl Ted {
                 }
             }
         }
+
         buffer.clear_changes();
+
+        // Draw the lines from the buffer
+        self.term.set_cursor(0, 0)?;
+        let selection = buffer.get_selection();
+        for (i, line) in buffer.get_lines().iter().enumerate() {
+            self.term.set_cursor(0, i as u16)?;
+            for (j, c) in line.char_indices() {
+                if selection.contains(&(i, j)) {
+                    print!(
+                        "{}{}{}",
+                        color::Bg(color::LightBlack),
+                        c,
+                        color::Bg(color::Reset)
+                    );
+                } else {
+                    print!("{}", c);
+                }
+            }
+            if line.len() < self.termsize.width as usize {
+                print!("{}", " ".repeat(self.termsize.width as usize - line.len()));
+            }
+            println!();
+        }
 
         // Prints out the status message
         let bottom = self.termsize.bottom();
@@ -180,6 +192,7 @@ impl Ted {
         self.minibuffer.set_current_line(message);
     }
 
+    // TODO: ask the user a filename to commit an in-memory buffer to
     fn file_save(&mut self) {
         let msg = match self.buffers.focused().overwrite_backend_file() {
             Ok(_) => String::from("File saved"),
@@ -290,6 +303,7 @@ impl Ted {
                         Key::Esc => {
                             self.universal_argument = None;
                             self.minibuffer.set_current_line("ESC".to_string());
+                            self.buffers.focused().remove_selection();
                         }
                         _ => {}
                     };
@@ -331,10 +345,10 @@ impl Ted {
                 for line in self.buffers.focused().del_lines(n) {
                     self.clipboard = format!("{}{}\n", self.clipboard, line);
                 }
-                // self.minibuffer.set_current_line(self.clipboard.to_string());
             }
             'x' => self.clipboard = self.buffers.focused().del_chars(n),
             'p' => self.paste(n),
+            's' => self.buffers.focused().mark_selection(),
             ' ' => self.space_mode(),
             c if c.is_digit(10) => {
                 let current = uarg.unwrap_or(0);

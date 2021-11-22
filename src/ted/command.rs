@@ -30,7 +30,7 @@ impl Default for Commands {
             commands: vec![
                 Command {
                     name: "space".to_string(),
-                    desc: "Enters command mode".to_string(),
+                    desc: "Enters command by name".to_string(),
                     chain: Some("  ".to_string()),
                     action: (|t| t.prompt_mode("Command".to_string(), Ted::run_command)),
                 },

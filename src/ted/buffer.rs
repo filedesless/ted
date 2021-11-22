@@ -1,5 +1,6 @@
 use super::Commands;
 use crate::ted::format_space_chain;
+use std::cmp::Ordering::{Equal, Greater, Less};
 use std::collections::LinkedList;
 use std::io;
 use std::io::{Error, ErrorKind};
@@ -16,6 +17,7 @@ pub struct Buffer {
     linum: usize, // within 0..lines.len()
     col: usize,   // within 0..=line.len()
     changes: LinkedList<Change>,
+    selection: Option<(usize, usize)>,
 }
 
 #[derive(Clone)]
@@ -45,7 +47,7 @@ const HELP: &str = r#"# Welcome to Ted
 
 - Press SPC q to quit from NORMAL mode.
 - Use "h, j, k, l" keys to move your cursor around in normal mode.
-- Edit text by entering INSERT mode with you "i" key.
+- Edit text by entering INSERT mode with your "i" key.
 - Press SPC to enter commands by chain.
 
 ## INSERT mode
@@ -57,6 +59,7 @@ const HELP: &str = r#"# Welcome to Ted
 "#;
 
 impl Default for Buffer {
+    // Home buffer with help
     fn default() -> Self {
         let mut message = String::from(HELP);
         for command in Commands::default().commands {
@@ -77,6 +80,7 @@ impl Default for Buffer {
 }
 
 impl Buffer {
+    // Basic in-memory buffer
     pub fn new(content: String, name: String) -> Self {
         let lines: Vec<String> = content.lines().map(String::from).collect();
         let lines = if lines.len() > 0 {
@@ -92,9 +96,11 @@ impl Buffer {
             changes: LinkedList::default(),
             name,
             file: None,
+            selection: None,
         }
     }
 
+    // Buffer with a backend file to save to
     pub fn from_file(path: &String) -> io::Result<Self> {
         let p = Path::new(&path);
         let name = if let Some(stem) = p.file_stem() {
@@ -187,6 +193,53 @@ impl Buffer {
         self.move_cursor_left(1);
     }
 
+    pub fn mark_selection(&mut self) {
+        self.selection = Some((self.linum, self.col));
+    }
+
+    pub fn remove_selection(&mut self) {
+        self.selection = None;
+    }
+
+    pub fn get_selection(&mut self) -> Vec<(usize, usize)> {
+        let mut v = vec![];
+        if let Some((linum, col)) = self.selection {
+            let (marked, current) = ((linum, col), (self.linum, self.col));
+            let ((lin1, col1), (lin2, col2)) = match linum.cmp(&self.linum) {
+                Less => (marked, current),
+                Greater => (current, marked),
+                Equal => {
+                    if col < self.col {
+                        (marked, current)
+                    } else {
+                        (current, marked)
+                    }
+                }
+            };
+            for x in lin1..=lin2 {
+                let line = &self.lines[x];
+                if x == lin1 && x == lin2 {
+                    for y in col1..(col2 + 1).min(line.len()) {
+                        v.push((x, y));
+                    }
+                } else if x == lin1 {
+                    for y in col1..line.len() {
+                        v.push((x, y));
+                    }
+                } else if x == lin2 {
+                    for y in 0..(col2 + 1).min(line.len()) {
+                        v.push((x, y));
+                    }
+                } else {
+                    for y in 0..line.len() {
+                        v.push((x, y));
+                    }
+                }
+            }
+        }
+        v
+    }
+
     pub fn move_cursor_left(&mut self, n: usize) {
         if self.col > n {
             self.move_cursor(self.linum, self.col - n);
@@ -268,7 +321,7 @@ impl Buffer {
             let u = line.len().min(self.col + n);
             let chars: String = line.drain(self.col..u).collect();
             self.changes.push_back(Change::ModifiedLine(self.linum));
-            return chars
+            return chars;
         }
         String::default()
     }
