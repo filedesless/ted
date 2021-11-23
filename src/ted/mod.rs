@@ -1,6 +1,6 @@
 use buffer::{Buffer, Mode, SubMode};
+use buffers::Buffers;
 use command::Commands;
-use ring_buffer::RingBuffer;
 use std::io;
 use termion::color;
 use termion::event::Key;
@@ -11,8 +11,8 @@ use tui::layout::Rect;
 use tui::Terminal;
 
 mod buffer;
+mod buffers;
 mod command;
-mod ring_buffer;
 
 type TTerm = Terminal<TermionBackend<AlternateScreen<RawTerminal<io::Stdout>>>>;
 // type TTerm = Terminal<TermionBackend<RawTerminal<io::Stdout>>>;
@@ -33,7 +33,7 @@ fn format_space_chain(space_chain: &String) -> String {
 
 pub struct Ted {
     term: TTerm,
-    buffers: RingBuffer,
+    buffers: Buffers,
     minibuffer: Buffer,
     exit: bool,
     prompt: String,
@@ -49,7 +49,7 @@ impl Ted {
     pub fn new(terminal: TTerm, termsize: Rect) -> Ted {
         Ted {
             term: terminal,
-            buffers: RingBuffer::default(),
+            buffers: Buffers::default(),
             minibuffer: Buffer::empty(),
             exit: false,
             prompt: String::default(),

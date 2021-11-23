@@ -1,19 +1,19 @@
 use super::buffer::Buffer;
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 
-pub struct RingBuffer {
-    buffers: LinkedList<Buffer>,
+pub struct Buffers {
+    buffers: VecDeque<Buffer>,
 }
 
-impl Default for RingBuffer {
+impl Default for Buffers {
     fn default() -> Self {
-        let mut buffers = LinkedList::default();
+        let mut buffers = VecDeque::default();
         buffers.push_back(Buffer::default());
-        Self { buffers }
+        Buffers { buffers }
     }
 }
 
-impl RingBuffer {
+impl Buffers {
     pub fn focused(&mut self) -> &mut Buffer {
         self.buffers.front_mut().unwrap()
     }
