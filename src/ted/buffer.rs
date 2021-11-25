@@ -1,6 +1,5 @@
 use super::Commands;
 use crate::ted::format_space_chain;
-use core::ops::RangeInclusive;
 use ropey::Rope;
 use std::collections::LinkedList;
 use std::fs::File;

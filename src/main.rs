@@ -1,25 +1,24 @@
+#![feature(backtrace)]
 mod ted;
 
-extern crate termion;
-
 use self::ted::Ted;
-use std::io;
-use std::panic;
-use std::env;
-use termion::event::Event;
-use termion::input::TermRead;
-use termion::raw::IntoRawMode;
-use termion::screen::{AlternateScreen, ToMainScreen};
-use tui::backend::TermionBackend;
+use crossterm::event::{read, Event};
+use crossterm::execute;
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use std::backtrace::Backtrace;
+use std::{env, io, panic};
+use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
-
 fn run() -> Result<(), io::Error> {
-    let stdin = io::stdin();
-    let stdout = io::stdout().into_raw_mode()?;
-    let screen = AlternateScreen::from(stdout);
-    let backend = TermionBackend::new(screen);
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
+
+    enable_raw_mode().expect("Failed to enable raw mode");
+    execute!(io::stdout(), EnterAlternateScreen)?;
 
     let size = terminal.size()?;
 
@@ -32,32 +31,40 @@ fn run() -> Result<(), io::Error> {
     }
     ted.draw()?;
 
-    for c in stdin.events() {
-        match c.unwrap() {
+    // TODO: loop with event polling
+    loop {
+        match read()? {
             Event::Key(k) => {
                 if ted.handle_key(k) {
                     break;
                 }
             }
+            // TODO: handle window resizing
+            Event::Resize(_, _) => {}
             _ => {}
         }
         ted.draw()?;
     }
 
-    print!("{}", ToMainScreen);
+    execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
 }
 
-fn log<F: Fn() -> Result<(), io::Error>>(f: F) {
-    if let Err(err) = f() {
-        println!("{}", ToMainScreen);
-        println!("Caught exception: {}", err);
-    }
-}
+fn main() -> Result<(), io::Error> {
+    panic::set_hook(Box::new(|panic_info| {
+        let backtrace = Backtrace::capture();
+        disable_raw_mode().unwrap();
+        execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            println!("panic occurred: {}", s);
+            println!("stack backtrace: {}", backtrace);
+        } else {
+            println!("panic occurred");
+        }
+    }));
 
-fn main() {
-    if let Err(err) = panic::catch_unwind(|| log(run)) {
-        print!("{}", ToMainScreen);
-        panic::resume_unwind(err);
-    }
+    run().or_else(|err| {
+        println!("main returned an error: {}", err);
+        Err(err)
+    })
 }

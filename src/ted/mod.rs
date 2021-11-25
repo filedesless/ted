@@ -1,13 +1,14 @@
-use crate::ted::buffer::Change::{DrawLine, DrawLinesFrom};
+use buffer::Change::{DrawLine, DrawLinesFrom};
 use buffer::{Buffer, EditMode, InputMode};
 use buffers::Buffers;
 use command::Commands;
+use crossterm::cursor::{CursorShape, SetCursorShape};
+use crossterm::event::KeyCode;
+use crossterm::event::{KeyEvent, KeyModifiers};
+use crossterm::execute;
+use crossterm::style::{Color, SetBackgroundColor};
 use std::io;
-use termion::color;
-use termion::event::Key;
-use termion::raw::RawTerminal;
-use termion::screen::AlternateScreen;
-use tui::backend::TermionBackend;
+use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
 use tui::Terminal;
 
@@ -15,8 +16,7 @@ mod buffer;
 mod buffers;
 mod command;
 
-type TTerm = Terminal<TermionBackend<AlternateScreen<RawTerminal<io::Stdout>>>>;
-// type TTerm = Terminal<TermionBackend<RawTerminal<io::Stdout>>>;
+type TTerm = Terminal<CrosstermBackend<io::Stdout>>;
 
 type TRes = Result<(), io::Error>;
 
@@ -65,7 +65,6 @@ impl Ted {
 
     // Initialize the terminal for use in Ted
     pub fn init(&mut self) -> TRes {
-        print!("{}", termion::cursor::Save);
         self.normal_mode();
         self.term.clear()?;
         self.draw()?;
@@ -119,7 +118,7 @@ impl Ted {
         // Apply selection
         if let Some((x, y)) = buffer.get_selection_coord() {
             self.term.set_cursor(x as u16, y as u16)?;
-            print!("{}", color::Bg(color::LightBlack));
+            execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey)).unwrap();
         }
 
         // Prints out the status message
@@ -131,7 +130,14 @@ impl Ted {
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
         let (pos, linum, col) = buffer.get_cursor();
-        let line = format!("{} - {} - {} {}:{}", buffer.name, status, pos, linum + 1, col + 1);
+        let line = format!(
+            "{} - {} - {} {}:{}",
+            buffer.name,
+            status,
+            pos,
+            linum + 1,
+            col + 1
+        );
         let fill = " ".repeat(self.termsize.width as usize - line.len());
         print!("{}{}", line, fill);
 
@@ -206,12 +212,12 @@ impl Ted {
 
     fn insert_mode(&mut self) {
         self.buffers.focused().insert_mode();
-        print!("{}", termion::cursor::SteadyBar);
+        execute!(io::stdout(), SetCursorShape(CursorShape::Line)).unwrap();
     }
 
     fn normal_mode(&mut self) {
         self.buffers.focused().normal_mode();
-        print!("{}", termion::cursor::SteadyBlock);
+        execute!(io::stdout(), SetCursorShape(CursorShape::Block)).unwrap();
     }
 
     fn prompt_mode(&mut self, prompt: String, f: fn(&mut Ted, String)) {
@@ -219,7 +225,7 @@ impl Ted {
         self.prompt_callback = Some(f);
         self.minibuffer.mode = InputMode::Insert;
         self.minibuffer.set_current_line(String::default());
-        print!("{}", termion::cursor::SteadyBar);
+        execute!(io::stdout(), SetCursorShape(CursorShape::Line)).unwrap();
     }
 
     fn space_mode(&mut self) {
@@ -239,14 +245,14 @@ impl Ted {
     }
 
     // returns wether the user asked to exit
-    pub fn handle_key(&mut self, key: Key) -> bool {
+    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         if !self.space_chain.is_empty() {
-            match key {
-                Key::Esc => {
+            match key.code {
+                KeyCode::Esc => {
                     self.normal_mode();
                     self.space_chain = String::default();
                 }
-                Key::Char(c) => {
+                KeyCode::Char(c) => {
                     self.space_chain.push(c);
                 }
                 _ => {}
@@ -271,8 +277,8 @@ impl Ted {
                 _ => self.print_space_chain(false),
             }
         } else if !self.prompt.is_empty() {
-            match key {
-                Key::Char('\n') => {
+            match key.code {
+                KeyCode::Char('\n') => {
                     let line = self.minibuffer.get_current_line().unwrap().to_string();
                     self.normal_mode();
                     self.prompt = String::default();
@@ -281,22 +287,22 @@ impl Ted {
                         f(self, line);
                     }
                 }
-                Key::Esc => {
+                KeyCode::Esc => {
                     self.normal_mode();
                     self.prompt = String::default();
                     self.prompt_callback = None;
                     self.minibuffer.set_current_line(String::default());
                 }
-                Key::Backspace => self.minibuffer.back_delete_char(),
-                Key::Char(c) => self.minibuffer.insert_char(c),
+                KeyCode::Backspace => self.minibuffer.back_delete_char(),
+                KeyCode::Char(c) => self.minibuffer.insert_char(c),
                 _ => {}
             };
         } else {
             match self.buffers.focused().mode {
                 InputMode::Normal => {
-                    match key {
-                        Key::Char(c) => self.normal_mode_handle_key(c),
-                        Key::Esc => {
+                    match key.code {
+                        KeyCode::Char(c) => self.normal_mode_handle_key(c),
+                        KeyCode::Esc => {
                             self.universal_argument = None;
                             self.minibuffer.set_current_line("ESC".to_string());
                             self.buffers.focused().remove_selection();
@@ -305,11 +311,13 @@ impl Ted {
                     };
                 }
                 InputMode::Insert => {
-                    match key {
-                        Key::Backspace => self.buffers.focused().back_delete_char(),
-                        Key::Ctrl('c') => self.normal_mode(),
-                        Key::Esc => self.normal_mode(),
-                        Key::Char(c) => self.buffers.focused().insert_char(c),
+                    match key.code {
+                        KeyCode::Backspace => self.buffers.focused().back_delete_char(),
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.normal_mode()
+                        }
+                        KeyCode::Esc => self.normal_mode(),
+                        KeyCode::Char(c) => self.buffers.focused().insert_char(c),
                         _ => {}
                     };
                 }
