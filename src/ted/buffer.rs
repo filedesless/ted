@@ -303,22 +303,22 @@ impl Buffer {
         }
     }
 
-    // TODO: fix out of bounds
     pub fn delete_lines(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let start = self.content.line_to_char(current_line_number);
-        let end = self.content.line_to_char(current_line_number + n);
+        let end_line_number = self.content.len_lines().min(current_line_number + n);
+        let end = self.content.line_to_char(end_line_number);
         self.content.remove(start..end);
         self.move_cursor(start);
         self.changes
             .push_back(Change::DrawLinesFrom(current_line_number));
     }
 
-    // TODO: fix out of bounds
     pub fn delete_chars(&mut self, n: usize) {
         let start_line_number = self.content.char_to_line(self.cursor);
-        let end_line_number = self.content.char_to_line(self.cursor + n);
-        self.content.remove(self.cursor..self.cursor + n);
+        let end = self.content.len_chars().min(self.cursor + n);
+        let end_line_number = self.content.char_to_line(end);
+        self.content.remove(self.cursor..end);
         if start_line_number == end_line_number {
             self.changes.push_back(Change::DrawLine(start_line_number));
         } else {
@@ -400,5 +400,18 @@ mod tests {
             Some(String::from("\n"))
         );
         assert_eq!(buffer.get_line(2).map(String::from), None);
+    }
+
+    #[test]
+    fn delete_line_out_of_bounds() {
+        let mut buffer = Buffer::new(String::from(""), String::from(""));
+        buffer.delete_lines(1000);
+        assert_eq!(buffer.get_line(0), None);
+    }
+
+    #[test]
+    fn delete_char_out_of_bounds() {
+        let mut buffer = Buffer::new(String::from(""), String::from(""));
+        buffer.delete_chars(1000);
     }
 }
