@@ -1,9 +1,7 @@
 use super::Commands;
 use crate::ted::format_space_chain;
 use core::ops::RangeInclusive;
-use ropey::iter::{Chars, Lines};
 use ropey::Rope;
-use ropey::RopeSlice;
 use std::collections::LinkedList;
 use std::fs::File;
 use std::io;
@@ -183,14 +181,15 @@ impl Buffer {
             .min(self.content.line(current_line_number).len_chars());
     }
 
+    fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
+        let current_line_number = self.content.char_to_line(pos);
+        let beginning_of_line = self.content.line_to_char(pos);
+        (current_line_number, self.cursor - beginning_of_line)
+    }
+
     pub fn get_cursor(&self) -> (usize, usize, usize) {
-        let current_line_number = self.content.char_to_line(self.cursor);
-        let beginning_of_line = self.content.line_to_char(current_line_number);
-        (
-            self.cursor,
-            current_line_number,
-            self.cursor - beginning_of_line,
-        )
+        let (x, y) = self.coord_from_pos(self.cursor);
+        (self.cursor, x, y)
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -228,9 +227,9 @@ impl Buffer {
         self.selection = None;
     }
 
-    pub fn get_selection(&mut self) -> Option<RangeInclusive<usize>> {
+    pub fn get_selection_coord(&self) -> Option<(usize, usize)> {
         self.selection
-            .map(|selection| selection.min(self.cursor)..=(selection.max(self.cursor)))
+            .map(|selection| self.coord_from_pos(selection))
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {
@@ -305,6 +304,7 @@ impl Buffer {
         }
     }
 
+    // TODO: fix out of bounds
     pub fn delete_lines(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let start = self.content.line_to_char(current_line_number);
@@ -315,6 +315,7 @@ impl Buffer {
             .push_back(Change::DrawLinesFrom(current_line_number));
     }
 
+    // TODO: fix out of bounds
     pub fn delete_chars(&mut self, n: usize) {
         let start_line_number = self.content.char_to_line(self.cursor);
         let end_line_number = self.content.char_to_line(self.cursor + n);

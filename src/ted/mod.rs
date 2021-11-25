@@ -116,6 +116,12 @@ impl Ted {
 
         buffer.clear_changes();
 
+        // Apply selection
+        if let Some((x, y)) = buffer.get_selection_coord() {
+            self.term.set_cursor(x as u16, y as u16)?;
+            print!("{}", color::Bg(color::LightBlack));
+        }
+
         // Prints out the status message
         self.term.set_cursor(0, status_line_number)?;
         let status = match (buffer.mode, buffer.edit_mode) {
