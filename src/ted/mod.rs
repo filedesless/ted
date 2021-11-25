@@ -1,4 +1,5 @@
-use buffer::{Buffer, Mode, SubMode};
+use crate::ted::buffer::Change::{DrawLine, DrawLinesFrom};
+use buffer::{Buffer, EditMode, InputMode};
 use buffers::Buffers;
 use command::Commands;
 use std::io;
@@ -77,77 +78,65 @@ impl Ted {
         self.termsize = self.term.size()?;
         self.term.hide_cursor()?;
 
-        let buffer = &mut self.buffers.focused();
+        let buffer = self.buffers.focused();
+        let bottom = self.termsize.bottom();
+        let status_line_number = bottom.saturating_sub(2);
+        let echo_line_number = bottom.saturating_sub(1);
+        let width = self.termsize.width as usize;
+        let draw_line = |linum| {
+            if let Some(line) = buffer.get_line(linum) {
+                let s = String::from(line);
+                let trimmed_line = s.trim();
+                if trimmed_line.len() < width {
+                    let fill = " ".repeat(width - trimmed_line.len());
+                    println!("{}{}", trimmed_line, fill);
+                } else {
+                    println!("{}", trimmed_line.get(..width).unwrap());
+                }
+            } else {
+                println!("~{}", " ".repeat(width));
+            }
+        };
 
         // Update tracked changes
         for change in buffer.get_changes() {
             match change {
-                buffer::Change::ModifiedLine(linum) => {
-                    let line = buffer.get_line(*linum);
-                    if line.len() < self.termsize.width as usize {
-                        let fill = " ".repeat(self.termsize.width as usize - line.len());
-                        self.term.set_cursor(self.termsize.x, *linum as u16)?;
-                        print!("{}{}", line, fill);
-                    } else {
-                        let eol = line.len().min(self.termsize.width as usize);
-                        println!("{}", line[0..eol].to_string());
-                    }
+                DrawLine(linum) => {
+                    self.term.set_cursor(0, *linum as u16)?;
+                    draw_line(*linum);
                 }
-                buffer::Change::DeletedLine(linum) => {
-                    self.term.set_cursor(self.termsize.x, *linum as u16)?;
-                    print!("{}", " ".repeat(self.termsize.width as usize));
+                DrawLinesFrom(start_line) => {
+                    for line_number in *start_line..(status_line_number as usize) {
+                        self.term.set_cursor(0, line_number as u16)?;
+                        draw_line(line_number);
+                    }
                 }
             }
         }
 
         buffer.clear_changes();
 
-        // Draw the lines from the buffer
-        self.term.set_cursor(0, 0)?;
-        let selection = buffer.get_selection();
-        for (i, line) in buffer.get_lines().iter().enumerate() {
-            self.term.set_cursor(0, i as u16)?;
-            for (j, c) in line.char_indices() {
-                if selection.contains(&(i, j)) {
-                    print!(
-                        "{}{}{}",
-                        color::Bg(color::LightBlack),
-                        c,
-                        color::Bg(color::Reset)
-                    );
-                } else {
-                    print!("{}", c);
-                }
-            }
-            if line.len() < self.termsize.width as usize {
-                print!("{}", " ".repeat(self.termsize.width as usize - line.len()));
-            }
-            println!();
-        }
-
         // Prints out the status message
-        let bottom = self.termsize.bottom();
-        if bottom > 1 {
-            self.term.set_cursor(0, bottom - 2)?;
-            let status = match buffer.mode {
-                Mode::Normal(SubMode::Char) => "NORMAL CHAR MODE",
-                Mode::Normal(SubMode::Line) => "NORMAL LINE MODE",
-                Mode::Insert => "INSERT MODE",
-            };
-            let (linum, col) = buffer.get_cursor();
-            let line = format!("{} - {} - {}:{}", buffer.name, status, linum + 1, col + 1);
-            let fill = " ".repeat(self.termsize.width as usize - line.len());
-            print!("{}{}", line, fill);
-        }
+        self.term.set_cursor(0, status_line_number)?;
+        let status = match (buffer.mode, buffer.edit_mode) {
+            (InputMode::Normal, EditMode::Char) => "NORMAL CHAR MODE",
+            (InputMode::Normal, EditMode::Line) => "NORMAL LINE MODE",
+            (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
+            (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
+        };
+        let (pos, linum, col) = buffer.get_cursor();
+        let line = format!("{} - {} - {} {}:{}", buffer.name, status, pos, linum + 1, col + 1);
+        let fill = " ".repeat(self.termsize.width as usize - line.len());
+        print!("{}{}", line, fill);
 
         // Prints out the echo area
-        self.term.set_cursor(0, bottom - 1)?;
-        let line = self.minibuffer.get_current_line();
+        self.term.set_cursor(0, echo_line_number)?;
+        let line = self.minibuffer.get_current_line().unwrap_or_default();
         if !self.prompt.is_empty() {
             let message = format!("{}: {}", self.prompt, line);
             let fill = " ".repeat(self.termsize.width as usize - message.len());
             print!("{}{}", message, fill);
-            let (linum, col) = self.minibuffer.get_cursor();
+            let (_, linum, col) = self.minibuffer.get_cursor();
             self.term.set_cursor(
                 (col + self.prompt.len() + 2) as u16,
                 self.termsize.bottom() + linum as u16,
@@ -155,7 +144,7 @@ impl Ted {
         } else {
             let fill = " ".repeat(self.termsize.width as usize - line.len());
             print!("{}{}", line, fill);
-            let (linum, col) = buffer.get_cursor();
+            let (_, linum, col) = buffer.get_cursor();
             let x = self.termsize.x + self.termsize.width.min(col as u16);
             self.term.set_cursor(x, linum as u16)?;
         }
@@ -201,6 +190,7 @@ impl Ted {
         self.minibuffer.set_current_line(msg);
     }
 
+    // TODO: trigger a redraw
     fn next_buffer(&mut self) {
         let _ = self.term.clear();
         self.buffers.cycle_next();
@@ -221,7 +211,7 @@ impl Ted {
     fn prompt_mode(&mut self, prompt: String, f: fn(&mut Ted, String)) {
         self.prompt = prompt;
         self.prompt_callback = Some(f);
-        self.minibuffer.mode = Mode::Insert;
+        self.minibuffer.mode = InputMode::Insert;
         self.minibuffer.set_current_line(String::default());
         print!("{}", termion::cursor::SteadyBar);
     }
@@ -277,7 +267,7 @@ impl Ted {
         } else if !self.prompt.is_empty() {
             match key {
                 Key::Char('\n') => {
-                    let line = self.minibuffer.get_current_line().to_string();
+                    let line = self.minibuffer.get_current_line().unwrap().to_string();
                     self.normal_mode();
                     self.prompt = String::default();
                     if let Some(f) = self.prompt_callback {
@@ -297,7 +287,7 @@ impl Ted {
             };
         } else {
             match self.buffers.focused().mode {
-                Mode::Normal(_) => {
+                InputMode::Normal => {
                     match key {
                         Key::Char(c) => self.normal_mode_handle_key(c),
                         Key::Esc => {
@@ -308,7 +298,7 @@ impl Ted {
                         _ => {}
                     };
                 }
-                Mode::Insert => {
+                InputMode::Insert => {
                     match key {
                         Key::Backspace => self.buffers.focused().back_delete_char(),
                         Key::Ctrl('c') => self.normal_mode(),
@@ -329,13 +319,12 @@ impl Ted {
         match c {
             ' ' => self.space_mode(),
             'i' => self.insert_mode(),
-            'a' => self.append(),
             'h' => self.buffers.focused().move_cursor_left(n),
             'j' => self.buffers.focused().move_cursor_down(n),
             'k' => self.buffers.focused().move_cursor_up(n),
             'l' => self.buffers.focused().move_cursor_right(n),
             's' => self.buffers.focused().mark_selection(),
-            'd' => self.clipboard = self.buffers.focused().delete(n),
+            'd' => self.buffers.focused().delete(n),
             'p' => self.buffers.focused().paste(n, &self.clipboard),
             '\t' => self.buffers.focused().cycle_submode(),
             'c' => todo!(), // copy
@@ -353,10 +342,5 @@ impl Ted {
             }
             _ => {}
         }
-    }
-
-    fn append(&mut self) {
-        self.buffers.focused().insert_mode();
-        self.buffers.focused().move_cursor_right(1);
     }
 }

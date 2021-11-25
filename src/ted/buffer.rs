@@ -1,7 +1,11 @@
 use super::Commands;
 use crate::ted::format_space_chain;
-use std::cmp::Ordering::{Equal, Greater, Less};
+use core::ops::RangeInclusive;
+use ropey::iter::{Chars, Lines};
+use ropey::Rope;
+use ropey::RopeSlice;
 use std::collections::LinkedList;
+use std::fs::File;
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
@@ -10,14 +14,14 @@ use std::time::SystemTime;
 // TODO: rework into some kind of non empty doubly linked list with a cursor
 #[derive(Clone)]
 pub struct Buffer {
-    pub mode: Mode,
     pub name: String,
+    pub mode: InputMode,
+    pub edit_mode: EditMode,
     file: Option<BackendFile>,
-    lines: Vec<String>,
-    linum: usize, // within 0..lines.len()
-    col: usize,   // within 0..=line.len()
+    content: Rope,
+    cursor: usize, // 0..content.len_chars()
     changes: LinkedList<Change>,
-    selection: Option<(usize, usize)>,
+    selection: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -30,19 +34,19 @@ pub struct BackendFile {
 pub enum Change {
     // ModifiedChar(usize, usize),
     // Indicates a line must be refreshed from the buffer
-    ModifiedLine(usize), // within 0..lines.len()
-    // Indicates a line must be removed from the screen
-    DeletedLine(usize), // outside buffer boundaries
+    DrawLine(usize), // within 0..lines.len()
+    // Indicates a line has been removed from the screen
+    DrawLinesFrom(usize), // can be outside buffer boundaries
 }
 
 #[derive(Copy, Clone)]
-pub enum Mode {
-    Normal(SubMode),
+pub enum InputMode {
+    Normal,
     Insert,
 }
 
 #[derive(Copy, Clone)]
-pub enum SubMode {
+pub enum EditMode {
     Line,
     Char,
 }
@@ -88,18 +92,14 @@ impl Default for Buffer {
 impl Buffer {
     // Basic in-memory buffer
     pub fn new(content: String, name: String) -> Self {
-        let lines: Vec<String> = content.lines().map(String::from).collect();
-        let lines = if lines.len() > 0 {
-            lines
-        } else {
-            vec![String::default()]
-        };
+        let mut changes = LinkedList::new();
+        changes.push_back(Change::DrawLinesFrom(0));
         Self {
-            mode: Mode::Normal(SubMode::Char),
-            lines,
-            linum: 0,
-            col: 0,
-            changes: LinkedList::default(),
+            mode: InputMode::Normal,
+            edit_mode: EditMode::Char,
+            content: Rope::from(content),
+            cursor: 0,
+            changes,
             name,
             file: None,
             selection: None,
@@ -139,8 +139,8 @@ impl Buffer {
                     }
                 }
             }
-            let content: Vec<String> = self.lines.iter().map(|s| s.clone()).collect();
-            std::fs::write(file.path.clone(), content.join("\n"))?;
+            let output_file = File::create(file.path.clone())?;
+            self.content.write_to(output_file)?;
             file.modified = SystemTime::now();
             Ok(())
         } else {
@@ -157,245 +157,248 @@ impl Buffer {
         &self.changes
     }
 
-    pub fn get_lines(&self) -> &Vec<String> {
-        &self.lines
+    // returns a non-empty line
+    pub fn get_line(&self, linum: usize) -> Option<String> {
+        if let Some(line) = self.content.get_line(linum) {
+            if line.len_chars() > 0 {
+                return Some(String::from(line));
+            }
+        }
+        None
     }
 
-    pub fn get_current_line(&self) -> &String {
-        &self.lines[self.linum]
+    pub fn get_current_line(&self) -> Option<String> {
+        let line_index = self.content.char_to_line(self.cursor);
+        self.get_line(line_index)
     }
 
     pub fn set_current_line(&mut self, line: String) {
-        self.lines[self.linum] = line;
-        self.col = self.col.min(self.get_eol());
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let start = self.content.line_to_char(current_line_number);
+        let end = self.content.line_to_char(current_line_number + 1);
+        self.content.remove(start..end);
+        self.content.insert(start, &line);
+        self.cursor = self
+            .cursor
+            .min(self.content.line(current_line_number).len_chars());
     }
 
-    pub fn get_line(&self, linum: usize) -> &String {
-        &self.lines[linum]
-    }
-
-    pub fn get_cursor(&self) -> (usize, usize) {
-        (self.linum, self.col)
+    pub fn get_cursor(&self) -> (usize, usize, usize) {
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let beginning_of_line = self.content.line_to_char(current_line_number);
+        (
+            self.cursor,
+            current_line_number,
+            self.cursor - beginning_of_line,
+        )
     }
 
     pub fn insert_char(&mut self, c: char) {
-        if c == '\n' {
-            self.new_line();
+        let old = self.content.len_lines();
+        self.content.insert_char(self.cursor, c);
+        if old == self.content.len_lines() {
+            self.changes
+                .push_back(Change::DrawLine(self.content.char_to_line(self.cursor)));
         } else {
-            let line = &mut self.lines[self.linum];
-            if self.col <= line.len() {
-                line.insert(self.col, c);
-                self.move_cursor_right(1);
-            }
+            self.changes.push_back(Change::DrawLinesFrom(
+                self.content.char_to_line(self.cursor),
+            ));
         }
+        self.cursor += 1;
     }
 
     pub fn insert_mode(&mut self) {
-        self.mode = Mode::Insert;
+        self.mode = InputMode::Insert;
     }
 
     pub fn normal_mode(&mut self) {
         match self.mode {
-            Mode::Insert => {
-                self.move_cursor_left(1);
-                Mode::Normal(SubMode::Char);
+            InputMode::Insert => {
+                self.mode = InputMode::Normal;
             }
             _ => {}
         }
     }
 
     pub fn mark_selection(&mut self) {
-        self.selection = Some((self.linum, self.col));
+        self.selection = Some(self.cursor);
     }
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
     }
 
-    pub fn get_selection(&mut self) -> Vec<(usize, usize)> {
-        let mut v = vec![];
-        if let Some((linum, col)) = self.selection {
-            let (marked, current) = ((linum, col), (self.linum, self.col));
-            let ((lin1, col1), (lin2, col2)) = match linum.cmp(&self.linum) {
-                Less => (marked, current),
-                Greater => (current, marked),
-                Equal => {
-                    if col < self.col {
-                        (marked, current)
-                    } else {
-                        (current, marked)
-                    }
-                }
-            };
-            for x in lin1..=lin2 {
-                let line = &self.lines[x];
-                if x == lin1 && x == lin2 {
-                    for y in col1..(col2 + 1).min(line.len()) {
-                        v.push((x, y));
-                    }
-                } else if x == lin1 {
-                    for y in col1..line.len() {
-                        v.push((x, y));
-                    }
-                } else if x == lin2 {
-                    for y in 0..(col2 + 1).min(line.len()) {
-                        v.push((x, y));
-                    }
-                } else {
-                    for y in 0..line.len() {
-                        v.push((x, y));
-                    }
-                }
-            }
-        }
-        v
+    pub fn get_selection(&mut self) -> Option<RangeInclusive<usize>> {
+        self.selection
+            .map(|selection| selection.min(self.cursor)..=(selection.max(self.cursor)))
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {
-        let dst = if self.col > n { self.col - n } else { 0 };
-        match self.mode {
-            Mode::Insert => {}
-            Mode::Normal(SubMode::Char) => self.move_cursor(self.linum, dst),
-            Mode::Normal(SubMode::Line) => self.move_cursor(self.linum, 0),
+        let line_number = self.content.char_to_line(self.cursor);
+        let beginning_of_line = self.content.line_to_char(line_number);
+        if self.cursor == beginning_of_line {
+            return;
+        }
+
+        match self.edit_mode {
+            EditMode::Char => self.move_cursor(self.cursor.saturating_sub(n)),
+            EditMode::Line => self.move_cursor(
+                self.content
+                    .line_to_char(self.content.char_to_line(self.cursor)),
+            ),
         }
     }
 
     pub fn move_cursor_right(&mut self, n: usize) {
-        match self.mode {
-            Mode::Insert => {}
-            Mode::Normal(SubMode::Char) => self.move_cursor(self.linum, self.col + n),
-            Mode::Normal(SubMode::Line) => self.move_cursor(self.linum, self.get_eol()),
+        let end_of_line = self.end_of_line(self.content.char_to_line(self.cursor));
+        if self.cursor == end_of_line {
+            return;
+        }
+
+        match self.edit_mode {
+            EditMode::Char => self.move_cursor(self.cursor + n),
+            EditMode::Line => self.move_cursor(
+                self.content
+                    .line_to_char(self.content.char_to_line(self.cursor) + 1)
+                    .saturating_sub(1),
+            ),
+        }
+    }
+
+    // will return last char position if line_number >= self.content.len_lines()
+    fn end_of_line(&self, line_number: usize) -> usize {
+        if let Some(line) = self.content.get_line(line_number) {
+            let beginning_of_line = self.content.line_to_char(line_number);
+            (beginning_of_line + line.len_chars()).saturating_sub(1)
+        } else {
+            self.content.len_chars().saturating_sub(1)
         }
     }
 
     pub fn move_cursor_up(&mut self, n: usize) {
-        if self.linum >= n {
-            self.move_cursor(self.linum - n, self.col);
-        } else {
-            self.move_cursor(0, self.col);
-        }
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
+        let dest_line_number = current_line_number.saturating_sub(n);
+        let dest_cursor = self.content.line_to_char(dest_line_number) + current_line_offset;
+        self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
     }
 
     pub fn move_cursor_down(&mut self, n: usize) {
-        self.move_cursor(self.linum + n, self.col)
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
+        let dest_cursor = self.content.line_to_char(current_line_number + n) + current_line_offset;
+        self.move_cursor(dest_cursor.min(self.end_of_line(current_line_number + n)));
     }
 
-    pub fn move_cursor(&mut self, linum: usize, col: usize) {
-        if self.lines.len() > 0 {
-            self.linum = linum.min(self.lines.len() - 1);
-        }
-
-        self.col = col.min(self.get_eol());
-    }
-
-    pub fn new_line(&mut self) {
-        let (old, new) = self.lines[self.linum].split_at(self.col);
-        let s = String::from(new);
-        self.lines[self.linum] = String::from(old);
-        self.lines.insert(self.linum + 1, s);
-        for i in self.linum..self.lines.len() {
-            self.changes.push_back(Change::ModifiedLine(i))
-        }
-        self.move_cursor(self.linum + 1, 0);
+    pub fn move_cursor(&mut self, cursor: usize) {
+        self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
     }
 
     pub fn clear_changes(&mut self) {
         self.changes.clear();
     }
 
-    pub fn delete(&mut self, n: usize) -> String {
-        match self.mode {
-            Mode::Insert => String::default(),
-            Mode::Normal(SubMode::Line) => self.delete_lines(n),
-            Mode::Normal(SubMode::Char) => self.delete_chars(n),
+    pub fn delete(&mut self, n: usize) {
+        match self.edit_mode {
+            EditMode::Line => self.delete_lines(n),
+            EditMode::Char => self.delete_chars(n),
         }
     }
 
-    pub fn delete_lines(&mut self, n: usize) -> String {
-        let u = self.lines.len().min(self.linum + n);
-        let removed_lines: Vec<String> = self
-            .lines
-            .drain(self.linum..u)
-            .map(|line| format!("{}\n", line))
-            .collect();
-        if self.lines.len() > 0 {
-            self.linum = self.linum.min(self.lines.len() - 1);
+    pub fn delete_lines(&mut self, n: usize) {
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let start = self.content.line_to_char(current_line_number);
+        let end = self.content.line_to_char(current_line_number + n);
+        self.content.remove(start..end);
+        self.move_cursor(start);
+        self.changes
+            .push_back(Change::DrawLinesFrom(current_line_number));
+    }
+
+    pub fn delete_chars(&mut self, n: usize) {
+        let start_line_number = self.content.char_to_line(self.cursor);
+        let end_line_number = self.content.char_to_line(self.cursor + n);
+        self.content.remove(self.cursor..self.cursor + n);
+        if start_line_number == end_line_number {
+            self.changes.push_back(Change::DrawLine(start_line_number));
         } else {
-            self.linum = 0;
-            self.lines = vec![String::default()];
+            self.changes
+                .push_back(Change::DrawLinesFrom(start_line_number));
         }
-        for i in self.linum..self.lines.len() {
-            self.changes.push_back(Change::ModifiedLine(i))
-        }
-        for i in self.lines.len()..self.lines.len() + removed_lines.len() {
-            self.changes.push_back(Change::DeletedLine(i));
-        }
-        self.col = self.col.min(self.get_eol());
-        removed_lines.join("")
-    }
-
-    // TODO: handle crossing line boundaries
-    pub fn delete_chars(&mut self, n: usize) -> String {
-        let line = &mut self.lines[self.linum];
-        if self.col < line.len() {
-            let u = line.len().min(self.col + n);
-            let chars: String = line.drain(self.col..u).collect();
-            self.changes.push_back(Change::ModifiedLine(self.linum));
-            return chars;
-        }
-        String::default()
     }
 
     pub fn back_delete_char(&mut self) {
-        if self.col > 0 {
-            self.move_cursor_left(1);
+        if self.cursor > 0 {
+            self.move_cursor(self.cursor.saturating_sub(1));
             self.delete_chars(1);
-        } else {
-            self.delete_lines(1);
-            self.move_cursor(self.linum, self.get_eol());
         }
     }
 
     pub fn cycle_submode(&mut self) {
-        self.mode = match self.mode {
-            Mode::Insert => Mode::Insert,
-            Mode::Normal(SubMode::Char) => Mode::Normal(SubMode::Line),
-            Mode::Normal(SubMode::Line) => Mode::Normal(SubMode::Char),
+        self.edit_mode = match self.edit_mode {
+            EditMode::Char => EditMode::Line,
+            EditMode::Line => EditMode::Char,
         }
     }
 
     pub fn paste(&mut self, n: usize, text: &String) {
-        let mode = self.mode;
-        self.mode = Mode::Insert;
-        let (linum, col) = self.get_cursor();
+        let old = self.content.len_lines();
         for _ in 0..n {
-            for c in text.chars() {
-                self.insert_char(c);
-            }
+            self.content.insert(self.cursor, text);
         }
-        self.linum = linum;
-        self.col = col;
-        self.mode = mode;
-    }
-
-    fn get_eol(&self) -> usize {
-        let n = self.get_current_line().len();
-        match self.mode {
-            Mode::Normal(_) if n > 0 => n - 1,
-            _ => n,
+        if old == self.content.len_lines() {
+            self.changes
+                .push_back(Change::DrawLine(self.content.char_to_line(self.cursor)));
+        } else {
+            self.changes.push_back(Change::DrawLinesFrom(
+                self.content.char_to_line(self.cursor),
+            ));
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::Buffer;
     #[test]
-    pub fn line_reverse_offset() {
-        let line = String::from("Hello world");
-        let i = 5;
-        let mut chars = line.chars();
-        assert_eq!(chars.nth(i).unwrap(), ' ');
-        let mut back = line.chars().rev().skip(line.len() - i - 1);
-        assert_eq!(back.nth(0).unwrap(), ' ');
+    fn end_of_line() {
+        // empty line defaults to first char, even if there's none
+        let buffer = Buffer::new(String::from(""), String::from(""));
+        assert_eq!(buffer.end_of_line(0), 0);
+        let buffer = Buffer::new(String::from("\n"), String::from(""));
+        assert_eq!(buffer.end_of_line(0), 0);
+        let buffer = Buffer::new(String::from("a\n"), String::from(""));
+        assert_eq!(buffer.end_of_line(0), 1);
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""));
+        assert_eq!(buffer.end_of_line(1), 4);
+        let buffer = Buffer::new(String::from("a\nbb"), String::from(""));
+        assert_eq!(buffer.end_of_line(1), 3);
+        // out of bound returns last pos
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""));
+        assert_eq!(buffer.end_of_line(2), 4);
+    }
+
+    #[test]
+    fn get_line() {
+        let buffer = Buffer::new(String::from(""), String::from(""));
+        assert_eq!(buffer.get_line(0).map(String::from), None);
+
+        let buffer = Buffer::new(String::from("\n"), String::from(""));
+        assert_eq!(
+            buffer.get_line(0).map(String::from),
+            Some(String::from("\n"))
+        );
+        assert_eq!(buffer.get_line(1).map(String::from), None);
+
+        let buffer = Buffer::new(String::from("a\n\n"), String::from(""));
+        assert_eq!(
+            buffer.get_line(0).map(String::from),
+            Some(String::from("a\n"))
+        );
+        assert_eq!(
+            buffer.get_line(1).map(String::from),
+            Some(String::from("\n"))
+        );
+        assert_eq!(buffer.get_line(2).map(String::from), None);
     }
 }
