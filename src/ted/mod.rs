@@ -44,6 +44,8 @@ pub struct Ted {
     prompt_callback: Option<fn(&mut Ted, String)>,
     universal_argument: Option<usize>,
     clipboard: String,
+    status_line: String,
+    echo_line: String,
 }
 
 impl Ted {
@@ -60,6 +62,8 @@ impl Ted {
             prompt_callback: None,
             universal_argument: None,
             clipboard: String::default(),
+            status_line: String::default(),
+            echo_line: String::default(),
         }
     }
 
@@ -68,15 +72,13 @@ impl Ted {
         self.normal_mode();
         self.term.clear()?;
         self.draw()?;
-        self.term.show_cursor()
+        self.term.hide_cursor()
     }
 
     // Redraw the buffer when we process an event
     pub fn draw(&mut self) -> TRes {
         self.term.autoresize()?;
         self.termsize = self.term.size()?;
-        self.term.hide_cursor()?;
-
         let buffer = self.buffers.focused();
         let bottom = self.termsize.bottom();
         let status_line_number = bottom.saturating_sub(2);
@@ -98,6 +100,10 @@ impl Ted {
         };
 
         // Update tracked changes
+        let changes = buffer.get_changes();
+        if !changes.is_empty() {
+            self.term.hide_cursor()?;
+        }
         for change in buffer.get_changes() {
             match change {
                 DrawLine(linum) => {
@@ -122,7 +128,6 @@ impl Ted {
         }
 
         // Prints out the status message
-        self.term.set_cursor(0, status_line_number)?;
         let status = match (buffer.mode, buffer.edit_mode) {
             (InputMode::Normal, EditMode::Char) => "NORMAL CHAR MODE",
             (InputMode::Normal, EditMode::Line) => "NORMAL LINE MODE",
@@ -138,29 +143,42 @@ impl Ted {
             linum + 1,
             col + 1
         );
-        let fill = " ".repeat(self.termsize.width as usize - line.len());
-        print!("{}{}", line, fill);
-
-        // Prints out the echo area
-        self.term.set_cursor(0, echo_line_number)?;
-        let line = self.minibuffer.get_current_line().unwrap_or_default();
-        if !self.prompt.is_empty() {
-            let message = format!("{}: {}", self.prompt, line);
-            let fill = " ".repeat(self.termsize.width as usize - message.len());
-            print!("{}{}", message, fill);
-            let (_, linum, col) = self.minibuffer.get_cursor();
-            self.term.set_cursor(
-                (col + self.prompt.len() + 2) as u16,
-                self.termsize.bottom() + linum as u16,
-            )?;
-        } else {
+        if line != self.status_line {
+            self.term.hide_cursor()?;
+            self.term.set_cursor(0, status_line_number)?;
             let fill = " ".repeat(self.termsize.width as usize - line.len());
             print!("{}{}", line, fill);
-            let (_, linum, col) = buffer.get_cursor();
-            let x = self.termsize.x + self.termsize.width.min(col as u16);
-            self.term.set_cursor(x, linum as u16)?;
+            self.status_line = line;
         }
 
+        // Prints out the echo area
+        let line = self.minibuffer.get_current_line().unwrap_or_default();
+        if line != self.echo_line {
+            self.term.hide_cursor()?;
+            self.term.set_cursor(0, echo_line_number)?;
+            if !self.prompt.is_empty() {
+                let message = format!("{}: {}", self.prompt, line);
+                let fill = " ".repeat(self.termsize.width as usize - message.len());
+                print!("{}{}", message, fill);
+                let (_, linum, col) = self.minibuffer.get_cursor();
+                self.term.set_cursor(
+                    (col + self.prompt.len() + 2) as u16,
+                    self.termsize.bottom() + linum as u16,
+                )?;
+            } else {
+                let fill = " ".repeat(self.termsize.width as usize - line.len());
+                print!("{}{}", line, fill);
+                let (_, linum, col) = buffer.get_cursor();
+                let x = self.termsize.x + self.termsize.width.min(col as u16);
+                self.term.set_cursor(x, linum as u16)?;
+            }
+            self.echo_line = line;
+            self.minibuffer.clear_changes();
+        }
+
+        if (col as u16, linum as u16) != self.term.get_cursor()? {
+            self.term.set_cursor(col as u16, linum as u16)?;
+        }
         self.term.show_cursor()
     }
 
