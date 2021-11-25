@@ -252,9 +252,8 @@ impl Ted {
                     self.normal_mode();
                     self.space_chain = String::default();
                 }
-                KeyCode::Char(c) => {
-                    self.space_chain.push(c);
-                }
+                KeyCode::Char(c) => self.space_chain.push(c),
+                KeyCode::Tab => self.space_chain.push('\t'),
                 _ => {}
             }
             let commands = self.commands.get_by_chain(&self.space_chain);
@@ -278,7 +277,7 @@ impl Ted {
             }
         } else if !self.prompt.is_empty() {
             match key.code {
-                KeyCode::Char('\n') => {
+                KeyCode::Enter => {
                     let line = self.minibuffer.get_current_line().unwrap().to_string();
                     self.normal_mode();
                     self.prompt = String::default();
@@ -314,6 +313,7 @@ impl Ted {
                 InputMode::Insert => {
                     match key.code {
                         KeyCode::Backspace => self.buffers.focused().back_delete_char(),
+                        KeyCode::Enter => self.buffers.focused().insert_char('\n'),
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             self.normal_mode()
                         }
