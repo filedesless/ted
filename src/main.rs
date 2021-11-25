@@ -46,6 +46,7 @@ fn run() -> Result<(), io::Error> {
         ted.draw()?;
     }
 
+    disable_raw_mode().expect("Failed to disable raw mode");
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
 }
@@ -57,10 +58,10 @@ fn main() -> Result<(), io::Error> {
         execute!(io::stdout(), LeaveAlternateScreen).unwrap();
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
             println!("panic occurred: {}", s);
-            println!("stack backtrace: {}", backtrace);
         } else {
             println!("panic occurred");
         }
+        println!("stack backtrace: {}", backtrace);
     }));
 
     run().or_else(|err| {

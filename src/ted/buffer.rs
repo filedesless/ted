@@ -181,9 +181,9 @@ impl Buffer {
     }
 
     fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
-        let current_line_number = self.content.char_to_line(pos);
-        let beginning_of_line = self.content.line_to_char(pos);
-        (current_line_number, self.cursor - beginning_of_line)
+        let line_number = self.content.char_to_line(pos);
+        let beginning_of_line = self.content.line_to_char(line_number);
+        (line_number, pos.saturating_sub(beginning_of_line))
     }
 
     pub fn get_cursor(&self) -> (usize, usize, usize) {

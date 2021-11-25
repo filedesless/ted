@@ -302,6 +302,7 @@ impl Ted {
                 InputMode::Normal => {
                     match key.code {
                         KeyCode::Char(c) => self.normal_mode_handle_key(c),
+                        KeyCode::Tab => self.buffers.focused().cycle_submode(),
                         KeyCode::Esc => {
                             self.universal_argument = None;
                             self.minibuffer.set_current_line("ESC".to_string());
@@ -340,7 +341,6 @@ impl Ted {
             's' => self.buffers.focused().mark_selection(),
             'd' => self.buffers.focused().delete(n),
             'p' => self.buffers.focused().paste(n, &self.clipboard),
-            '\t' => self.buffers.focused().cycle_submode(),
             'c' => todo!(), // copy
             'u' => todo!(), // undo
             'r' => todo!(), // redo
