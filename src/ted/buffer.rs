@@ -265,9 +265,9 @@ impl Buffer {
 
     // will return last char position if line_number >= self.content.len_lines()
     fn end_of_line(&self, line_number: usize) -> usize {
-        if let Some(line) = self.content.get_line(line_number) {
+        if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
-            (beginning_of_line + line.len_chars()).saturating_sub(1)
+            beginning_of_line + line.len().saturating_sub(1)
         } else {
             self.content.len_chars().saturating_sub(1)
         }
@@ -376,6 +376,8 @@ mod tests {
         // out of bound returns last pos
         let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""));
         assert_eq!(buffer.end_of_line(2), 4);
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""));
+        assert_eq!(buffer.end_of_line(3), 4);
     }
 
     #[test]
