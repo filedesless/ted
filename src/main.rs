@@ -1,4 +1,3 @@
-#![feature(backtrace)]
 mod ted;
 
 use self::ted::Ted;
@@ -7,7 +6,6 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use std::backtrace::Backtrace;
 use std::{env, io, panic};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
@@ -52,16 +50,11 @@ fn run() -> Result<(), io::Error> {
 }
 
 fn main() -> Result<(), io::Error> {
-    panic::set_hook(Box::new(|panic_info| {
-        let backtrace = Backtrace::capture();
+    let default_panic = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
         disable_raw_mode().unwrap();
         execute!(io::stdout(), LeaveAlternateScreen).unwrap();
-        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-            println!("panic occurred: {}", s);
-        } else {
-            println!("panic occurred");
-        }
-        println!("stack backtrace: {}", backtrace);
+        default_panic(panic_info);
     }));
 
     run().or_else(|err| {
