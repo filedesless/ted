@@ -1,3 +1,4 @@
+use crate::ted::buffer::Change::UpdateSelection;
 use buffer::Change::{DrawLine, DrawLinesFrom};
 use buffer::{Buffer, EditMode, InputMode};
 use buffers::Buffers;
@@ -116,16 +117,27 @@ impl Ted {
                         draw_line(line_number);
                     }
                 }
+                UpdateSelection(range) => {
+                    let (mut y, x) = buffer.coord_from_pos(range.start);
+                    self.term.set_cursor(x as u16, y as u16)?;
+                    execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey))?;
+                    if let Some(slice) = buffer.get_slice(range.clone()) {
+                        for c in slice.chars() {
+                            if c == '\n' {
+                                y += 1;
+                                self.term.set_cursor(0, y as u16)?;
+                            } else {
+                                print!("{}", c);
+                            }
+                        }
+                    }
+                    execute!(io::stdout(), SetBackgroundColor(Color::Black))?;
+                }
             }
         }
 
+        let buffer = self.buffers.focused_mut();
         buffer.clear_changes();
-
-        // Apply selection
-        if let Some((x, y)) = buffer.get_selection_coord() {
-            self.term.set_cursor(x as u16, y as u16)?;
-            execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey)).unwrap();
-        }
 
         // Prints out the status message
         let status = match (buffer.mode, buffer.edit_mode) {
@@ -176,9 +188,15 @@ impl Ted {
             self.minibuffer.clear_changes();
         }
 
-        if (col as u16, linum as u16) != self.term.get_cursor()? {
-            self.term.set_cursor(col as u16, linum as u16)?;
+        // Apply selection
+        if let Some((line_number, column_number)) = buffer.get_selection_coord() {
+            self.term.set_cursor(column_number as u16, line_number as u16)?;
+            execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey)).unwrap();
         }
+
+        // Restore cursor
+        self.term.set_cursor(col as u16, linum as u16)?;
+        execute!(io::stdout(), SetBackgroundColor(Color::Black)).unwrap();
         self.term.show_cursor()
     }
 
@@ -213,7 +231,7 @@ impl Ted {
     }
 
     fn file_save(&mut self) {
-        let msg = match self.buffers.focused().overwrite_backend_file() {
+        let msg = match self.buffers.focused_mut().overwrite_backend_file() {
             Ok(_) => String::from("File saved"),
             Err(e) => e.to_string(),
         };
@@ -229,12 +247,12 @@ impl Ted {
     }
 
     fn insert_mode(&mut self) {
-        self.buffers.focused().insert_mode();
+        self.buffers.focused_mut().insert_mode();
         execute!(io::stdout(), SetCursorShape(CursorShape::Line)).unwrap();
     }
 
     fn normal_mode(&mut self) {
-        self.buffers.focused().normal_mode();
+        self.buffers.focused_mut().normal_mode();
         execute!(io::stdout(), SetCursorShape(CursorShape::Block)).unwrap();
     }
 
@@ -319,24 +337,24 @@ impl Ted {
                 InputMode::Normal => {
                     match key.code {
                         KeyCode::Char(c) => self.normal_mode_handle_key(c),
-                        KeyCode::Tab => self.buffers.focused().cycle_submode(),
+                        KeyCode::Tab => self.buffers.focused_mut().cycle_submode(),
                         KeyCode::Esc => {
                             self.universal_argument = None;
                             self.minibuffer.set_current_line("ESC".to_string());
-                            self.buffers.focused().remove_selection();
+                            self.buffers.focused_mut().remove_selection();
                         }
                         _ => {}
                     };
                 }
                 InputMode::Insert => {
                     match key.code {
-                        KeyCode::Backspace => self.buffers.focused().back_delete_char(),
-                        KeyCode::Enter => self.buffers.focused().insert_char('\n'),
+                        KeyCode::Backspace => self.buffers.focused_mut().back_delete_char(),
+                        KeyCode::Enter => self.buffers.focused_mut().insert_char('\n'),
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             self.normal_mode()
                         }
                         KeyCode::Esc => self.normal_mode(),
-                        KeyCode::Char(c) => self.buffers.focused().insert_char(c),
+                        KeyCode::Char(c) => self.buffers.focused_mut().insert_char(c),
                         _ => {}
                     };
                 }
@@ -352,13 +370,13 @@ impl Ted {
         match c {
             ' ' => self.space_mode(),
             'i' => self.insert_mode(),
-            'h' => self.buffers.focused().move_cursor_left(n),
-            'j' => self.buffers.focused().move_cursor_down(n),
-            'k' => self.buffers.focused().move_cursor_up(n),
-            'l' => self.buffers.focused().move_cursor_right(n),
-            's' => self.buffers.focused().mark_selection(),
-            'd' => self.buffers.focused().delete(n),
-            'p' => self.buffers.focused().paste(n, &self.clipboard),
+            'h' => self.buffers.focused_mut().move_cursor_left(n),
+            'j' => self.buffers.focused_mut().move_cursor_down(n),
+            'k' => self.buffers.focused_mut().move_cursor_up(n),
+            'l' => self.buffers.focused_mut().move_cursor_right(n),
+            's' => self.buffers.focused_mut().mark_selection(),
+            'd' => self.buffers.focused_mut().delete(n),
+            'p' => self.buffers.focused_mut().paste(n, &self.clipboard),
             'c' => todo!(), // copy
             'u' => todo!(), // undo
             'r' => todo!(), // redo

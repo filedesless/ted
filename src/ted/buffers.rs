@@ -15,7 +15,11 @@ impl Default for Buffers {
 
 impl Buffers {
 
-    pub fn focused(&mut self) -> &mut Buffer {
+    pub fn focused(&self) -> &Buffer {
+        self.buffers.front().unwrap()
+    }
+
+    pub fn focused_mut(&mut self) -> &mut Buffer {
         self.buffers.front_mut().unwrap()
     }
 

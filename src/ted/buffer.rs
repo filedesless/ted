@@ -1,14 +1,15 @@
 use super::Commands;
 use crate::ted::format_space_chain;
 use ropey::Rope;
+use ropey::RopeSlice;
 use std::collections::LinkedList;
 use std::fs::File;
 use std::io;
 use std::io::{Error, ErrorKind};
+use std::ops::{Range, RangeBounds};
 use std::path::Path;
 use std::time::SystemTime;
 
-// TODO: rework into some kind of non empty doubly linked list with a cursor
 #[derive(Clone)]
 pub struct Buffer {
     pub name: String,
@@ -29,11 +30,12 @@ pub struct BackendFile {
 
 #[derive(Clone)]
 pub enum Change {
-    // ModifiedChar(usize, usize),
-    // Indicates a line must be refreshed from the buffer
+    /// Indicates a line must be refreshed from the buffer
     DrawLine(usize), // within 0..lines.len()
-    // Indicates a line has been removed from the screen
+    /// Indicates a line has been added or removed
     DrawLinesFrom(usize), // can be outside buffer boundaries
+    /// Indicates chars in the range are selected
+    UpdateSelection(Range<usize>),
 }
 
 #[derive(Copy, Clone)]
@@ -87,7 +89,7 @@ impl Default for Buffer {
 }
 
 impl Buffer {
-    // Basic in-memory buffer
+    /// Basic in-memory buffer
     pub fn new(content: String, name: String) -> Self {
         let mut changes = LinkedList::new();
         changes.push_back(Change::DrawLinesFrom(0));
@@ -103,7 +105,7 @@ impl Buffer {
         }
     }
 
-    // Buffer with a backend file to save to
+    /// Buffer with a backend file to save to
     pub fn from_file(path: &String) -> io::Result<Self> {
         let p = Path::new(&path);
         let name = if let Some(stem) = p.file_stem() {
@@ -154,7 +156,7 @@ impl Buffer {
         &self.changes
     }
 
-    // returns a non-empty line
+    /// returns a non-empty line
     pub fn get_line(&self, linum: usize) -> Option<String> {
         if let Some(line) = self.content.get_line(linum) {
             if line.len_chars() > 0 {
@@ -162,6 +164,13 @@ impl Buffer {
             }
         }
         None
+    }
+
+    pub fn get_slice<R>(&self, range: R) -> Option<RopeSlice>
+    where
+        R: RangeBounds<usize>,
+    {
+        self.content.get_slice(range)
     }
 
     pub fn get_current_line(&self) -> Option<String> {
@@ -180,7 +189,8 @@ impl Buffer {
             .min(self.content.line(current_line_number).len_chars());
     }
 
-    fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
+    /// returns (line_number, column_number)
+    pub fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
         let line_number = self.content.char_to_line(pos);
         let beginning_of_line = self.content.line_to_char(line_number);
         (line_number, pos.saturating_sub(beginning_of_line))
@@ -263,7 +273,7 @@ impl Buffer {
         }
     }
 
-    // will return last char position if line_number >= self.content.len_lines()
+    /// will return last char position if line_number >= self.content.len_lines()
     fn end_of_line(&self, line_number: usize) -> usize {
         if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
@@ -289,7 +299,13 @@ impl Buffer {
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
-        self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
+        let new_position = cursor.min(self.content.len_chars().saturating_sub(1));
+        if self.selection.is_some() {
+            let start = self.cursor.min(new_position);
+            let end = self.cursor.max(new_position);
+            self.changes.push_back(Change::UpdateSelection(start..end));
+        }
+        self.cursor = new_position;
     }
 
     pub fn clear_changes(&mut self) {
