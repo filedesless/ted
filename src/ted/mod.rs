@@ -80,7 +80,7 @@ impl Ted {
         let buffer = self.buffers.focused_mut();
         let status_line_number = height.saturating_sub(2);
         let echo_line_number = height.saturating_sub(1);
-        buffer.window = buffer.window.start..buffer.window.start + status_line_number - 2;
+        buffer.resize_window(status_line_number);
         let (cursor, line_number, column_number) = buffer.get_cursor();
 
         // Redraw buffer
@@ -96,7 +96,7 @@ impl Ted {
                     let char_index = first_position + offset;
                     line_length += 1;
                     if let Some(true) = selection.as_ref().map(|s| char_index == s.start) {
-                        execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey));
+                        execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey))?;
                     }
                     if character == '\n' {
                         current_line += 1;
@@ -109,9 +109,9 @@ impl Ted {
                         print!("{}", character);
                     }
                     if let Some(true) = selection.as_ref().map(|s| char_index == s.end) {
-                        execute!(io::stdout(), SetBackgroundColor(Color::Black));
+                        execute!(io::stdout(), SetBackgroundColor(Color::Black))?;
                     }
-                    if current_line >= buffer.window.end {
+                    if current_line >= status_line_number {
                         break;
                     }
                 }
@@ -133,15 +133,16 @@ impl Ted {
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
         let line = format!(
-            "{} - {} - ({}x{} at :{}) {} {}:{}",
+            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {}",
             buffer.name,
             status,
             width,
             height,
-            buffer.window.start,
             cursor,
-            line_number + 1,
-            column_number + 1,
+            line_number,
+            column_number,
+            buffer.window.start,
+            buffer.window.end,
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
@@ -150,8 +151,6 @@ impl Ted {
             print!("{}{}", line, fill);
             self.status_line = line;
         }
-
-        self.term.set_cursor(column_number as u16, line_number as u16)?;
 
         // Prints out the echo area
         let line = self.minibuffer.get_current_line().unwrap_or_default();
@@ -174,6 +173,10 @@ impl Ted {
             self.echo_line = line;
         }
 
+        self.term.set_cursor(
+            column_number as u16,
+            (line_number - buffer.window.start) as u16,
+        )?;
         self.term.show_cursor()
     }
 

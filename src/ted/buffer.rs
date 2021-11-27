@@ -9,7 +9,6 @@ use std::ops::Range;
 use std::path::Path;
 use std::time::SystemTime;
 
-#[derive(Clone)]
 pub struct Buffer {
     pub name: String,
     pub mode: InputMode,
@@ -22,7 +21,6 @@ pub struct Buffer {
     selection: Option<usize>,
 }
 
-#[derive(Clone)]
 pub struct BackendFile {
     path: String,
     modified: SystemTime,
@@ -151,6 +149,13 @@ impl Buffer {
         None
     }
 
+    pub fn resize_window(&mut self, height: usize) {
+        self.window.end = self.window.start + height;
+        if self.content.char_to_line(self.cursor) >= self.window.end {
+            self.cursor = self.end_of_line(self.window.end);
+        }
+    }
+
     /// returns chars from the buffer and the offset of the first
     pub fn get_chars(&self) -> Option<(Chars, usize)> {
         if self.window.start <= self.content.len_lines() {
@@ -176,7 +181,7 @@ impl Buffer {
             .min(self.content.line(current_line_number).len_chars());
     }
 
-    /// returns (line_number, column_number)
+    /// returns (line_number, column_number) within self.window
     pub fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
         let line_number = self.content.char_to_line(pos);
         let beginning_of_line = self.content.line_to_char(line_number);
@@ -298,9 +303,9 @@ impl Buffer {
             self.window = self.window.start - offset..self.window.end - offset;
             self.dirty = true;
         }
-        if dest_line_number > self.window.end {
-            let offset = dest_line_number - self.window.end; // at least 1
-            self.window = self.window.start + offset..self.window.end + offset;
+        if dest_line_number >= self.window.end {
+            let offset = dest_line_number - self.window.end + 1; // at least 1
+            self.window = (self.window.start + offset)..(self.window.end + offset);
             self.dirty = true;
         }
         self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
