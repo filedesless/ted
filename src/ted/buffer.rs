@@ -14,7 +14,7 @@ pub struct Buffer {
     pub mode: InputMode,
     pub edit_mode: EditMode,
     pub dirty: bool,
-    pub window: Range<usize>,
+    window: Range<usize>,
     file: Option<BackendFile>,
     content: Rope,
     cursor: usize, // 0..content.len_chars()
@@ -181,6 +181,11 @@ impl Buffer {
             .min(self.content.line(current_line_number).len_chars());
     }
 
+    /// returns the [first_line_number, last_line_number) within view
+    pub fn get_window(&self) -> &Range<usize> {
+        &self.window
+    }
+
     /// returns (line_number, column_number) within self.window
     pub fn coord_from_pos(&self, pos: usize) -> (usize, usize) {
         let line_number = self.content.char_to_line(pos);
@@ -288,7 +293,7 @@ impl Buffer {
     pub fn move_cursor_down(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
-        let dest_line_number = current_line_number + n;
+        let dest_line_number = self.content.len_lines().min(current_line_number + n);
         let dest_cursor = self.content.line_to_char(dest_line_number) + current_line_offset;
         self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
     }
@@ -309,6 +314,17 @@ impl Buffer {
             self.dirty = true;
         }
         self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
+    }
+
+    pub fn page_up(&mut self, n: usize) {
+        let height = self.window.end - self.window.start;
+        self.move_cursor_up((height / 2) * n);
+
+    }
+
+    pub fn page_down(&mut self, n: usize) {
+        let height = self.window.end - self.window.start;
+        self.move_cursor_down((height / 2) * n);
     }
 
     pub fn delete(&mut self, n: usize) {

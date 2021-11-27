@@ -6,6 +6,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::{KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::style::{Color, SetBackgroundColor};
+
 use std::io;
 use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
@@ -132,6 +133,7 @@ impl Ted {
             (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
+        let window = buffer.get_window();
         let line = format!(
             "{} - {} - ({}x{}) at {} ({}:{}), from {} to {}",
             buffer.name,
@@ -141,8 +143,8 @@ impl Ted {
             cursor,
             line_number,
             column_number,
-            buffer.window.start,
-            buffer.window.end,
+            window.start,
+            window.end,
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
@@ -175,7 +177,7 @@ impl Ted {
 
         self.term.set_cursor(
             column_number as u16,
-            (line_number - buffer.window.start) as u16,
+            (line_number - window.start) as u16,
         )?;
         self.term.show_cursor()
     }
@@ -354,8 +356,10 @@ impl Ted {
             'i' => self.insert_mode(),
             'h' => self.buffers.focused_mut().move_cursor_left(n),
             'H' => self.buffers.focused_mut().move_cursor_bol(),
-            'j' => self.buffers.focused_mut().move_cursor_down(n),
             'k' => self.buffers.focused_mut().move_cursor_up(n),
+            'K' => self.buffers.focused_mut().page_up(n),
+            'j' => self.buffers.focused_mut().move_cursor_down(n),
+            'J' => self.buffers.focused_mut().page_down(n),
             'l' => self.buffers.focused_mut().move_cursor_right(n),
             'L' => self.buffers.focused_mut().move_cursor_eol(),
             's' => self.buffers.focused_mut().mark_selection(),
