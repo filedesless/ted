@@ -66,25 +66,23 @@ impl Ted {
         }
     }
 
-    // Initialize the terminal for use in Ted
-    pub fn init(&mut self) -> TRes {
-        self.normal_mode();
-        self.term.clear()?;
-        self.draw()?;
-        self.term.hide_cursor()
-    }
-
-    // Redraw the buffer when we process an event
-    pub fn draw(&mut self) -> TRes {
+    pub fn handle_resize(&mut self) -> TRes {
+        self.buffers.focused_mut().dirty = true;
         self.term.autoresize()?;
         self.termsize = self.term.size()?;
-        let buffer = self.buffers.focused_mut();
-        let bottom = self.termsize.bottom();
-        let status_line_number = bottom.saturating_sub(2);
-        let echo_line_number = bottom.saturating_sub(1);
+        Ok(())
+    }
+
+    /// Redraw the buffer when we process an event
+    pub fn draw(&mut self) -> TRes {
         let width = self.termsize.width as usize;
+        let height = self.termsize.height as usize;
+        let buffer = self.buffers.focused_mut();
+        let status_line_number = height.saturating_sub(2);
+        let echo_line_number = height.saturating_sub(1);
 
         // Redraw buffer
+        // TODO use tui::buffer::Buffer instead of printing to stdout
         if buffer.dirty {
             self.term.hide_cursor()?;
             let mut line_number = 0;
@@ -99,9 +97,10 @@ impl Ted {
                     line_length = 0;
                 } else {
                     print!("{}", c);
+                    line_length += 1;
                 }
                 if line_number == status_line_number {
-                    break
+                    break;
                 }
             }
 
@@ -122,16 +121,18 @@ impl Ted {
         };
         let (pos, linum, col) = buffer.get_cursor();
         let line = format!(
-            "{} - {} - {} {}:{}",
+            "{} - {} - ({}x{}) {} {}:{}",
             buffer.name,
             status,
+            width,
+            height,
             pos,
             linum + 1,
-            col + 1
+            col + 1,
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
-            self.term.set_cursor(0, status_line_number)?;
+            self.term.set_cursor(0, status_line_number as u16)?;
             let fill = " ".repeat(self.termsize.width as usize - line.len());
             print!("{}{}", line, fill);
             self.status_line = line;
@@ -141,7 +142,7 @@ impl Ted {
         let line = self.minibuffer.get_current_line().unwrap_or_default();
         if line != self.echo_line {
             self.term.hide_cursor()?;
-            self.term.set_cursor(0, echo_line_number)?;
+            self.term.set_cursor(0, echo_line_number as u16)?;
             if !self.prompt.is_empty() {
                 let message = format!("{}: {}", self.prompt, line);
                 let fill = " ".repeat(self.termsize.width as usize - message.len());

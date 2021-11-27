@@ -13,15 +13,15 @@ use tui::Terminal;
 fn run() -> Result<(), io::Error> {
     let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::new(backend)?;
 
     enable_raw_mode().expect("Failed to enable raw mode");
+    terminal.clear()?;
     execute!(io::stdout(), EnterAlternateScreen)?;
 
     let size = terminal.size()?;
 
     let mut ted = Ted::new(terminal, size.clone());
-    ted.init()?;
 
     for argument in env::args().skip(1) {
         println!("{}", argument);
@@ -37,8 +37,7 @@ fn run() -> Result<(), io::Error> {
                     break;
                 }
             }
-            // TODO: handle window resizing
-            Event::Resize(_, _) => {}
+            Event::Resize(_, _) => ted.handle_resize()?,
             _ => {}
         }
         ted.draw()?;
