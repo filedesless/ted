@@ -89,10 +89,10 @@ impl Ted {
             let mut line_number = 0;
             let mut line_length = 0;
             self.term.set_cursor(0, line_number as u16)?;
-            let selection = buffer.get_selection();
+            let selection = buffer.get_selection_range();
             for (i, c) in buffer.get_chars().enumerate() {
                 line_length += 1;
-                if let Some(true) = selection.map(|s| s.min(cursor) == i) {
+                if let Some(true) = selection.as_ref().map(|s| i == s.start) {
                     execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey));
                 }
                 if c == '\n' || line_length >= width {
@@ -103,7 +103,7 @@ impl Ted {
                 } else {
                     print!("{}", c);
                 }
-                if let Some(true) = selection.map(|s| s.max(cursor) == i) {
+                if let Some(true) = selection.as_ref().map(|s| i == s.end) {
                     execute!(io::stdout(), SetBackgroundColor(Color::Black));
                 }
                 if line_number == status_line_number {

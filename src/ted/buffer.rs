@@ -5,6 +5,7 @@ use ropey::Rope;
 use std::fs::File;
 use std::io;
 use std::io::{Error, ErrorKind};
+use std::ops::Range;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -202,14 +203,27 @@ impl Buffer {
 
     pub fn mark_selection(&mut self) {
         self.selection = Some(self.cursor);
+        self.dirty = true;
     }
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
+        self.dirty = true;
     }
 
-    pub fn get_selection(&self) -> Option<usize> {
-        self.selection
+    pub fn get_selection_range(&self) -> Option<Range<usize>> {
+        match self.edit_mode {
+            EditMode::Char => self
+                .selection
+                .map(|selection| (selection.min(self.cursor)..selection.max(self.cursor))),
+            EditMode::Line => self.selection.map(|selection| {
+                let selected = self.content.char_to_line(selection);
+                let current = self.content.char_to_line(self.cursor);
+                let start = self.content.line_to_char(selected.min(current));
+                let end = self.end_of_line(selected.max(current));
+                start..end
+            }),
+        }
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {
@@ -308,6 +322,7 @@ impl Buffer {
     }
 
     pub fn cycle_submode(&mut self) {
+        self.dirty = true;
         self.edit_mode = match self.edit_mode {
             EditMode::Char => EditMode::Line,
             EditMode::Line => EditMode::Char,
