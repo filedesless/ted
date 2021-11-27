@@ -15,6 +15,7 @@ pub struct Buffer {
     pub mode: InputMode,
     pub edit_mode: EditMode,
     pub dirty: bool,
+    pub window: Range<usize>,
     file: Option<BackendFile>,
     content: Rope,
     cursor: usize, // 0..content.len_chars()
@@ -89,6 +90,7 @@ impl Buffer {
             file: None,
             selection: None,
             dirty: true,
+            window: 0..1,
         }
     }
 
@@ -140,8 +142,8 @@ impl Buffer {
     }
 
     /// returns a non-empty line
-    pub fn get_line(&self, linum: usize) -> Option<String> {
-        if let Some(line) = self.content.get_line(linum) {
+    pub fn get_line(&self, line_number: usize) -> Option<String> {
+        if let Some(line) = self.content.get_line(line_number) {
             if line.len_chars() > 0 {
                 return Some(String::from(line));
             }
@@ -149,8 +151,13 @@ impl Buffer {
         None
     }
 
-    pub fn get_chars(&self) -> Chars {
-        self.content.chars()
+    /// returns chars from the buffer and the offset of the first
+    pub fn get_chars(&self) -> Option<(Chars, usize)> {
+        if self.window.start <= self.content.len_lines() {
+            let bol = self.content.line_to_char(self.window.start);
+            return Some((self.content.chars_at(bol), bol));
+        }
+        None
     }
 
     pub fn get_current_line(&self) -> Option<String> {
@@ -176,10 +183,10 @@ impl Buffer {
         (line_number, pos.saturating_sub(beginning_of_line))
     }
 
-    /// returns (cursor, column_number, line_number)
+    /// returns (cursor, line_number, column_number)
     pub fn get_cursor(&self) -> (usize, usize, usize) {
-        let (x, y) = self.coord_from_pos(self.cursor);
-        (self.cursor, x, y)
+        let (line_number, column_number) = self.coord_from_pos(self.cursor);
+        (self.cursor, line_number, column_number)
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -226,6 +233,16 @@ impl Buffer {
         }
     }
 
+    pub fn move_cursor_bol(&mut self) {
+        let current_line = self.content.char_to_line(self.cursor);
+        self.move_cursor(self.content.line_to_char(current_line));
+    }
+
+    pub fn move_cursor_eol(&mut self) {
+        let current_line = self.content.char_to_line(self.cursor);
+        self.move_cursor(self.end_of_line(current_line));
+    }
+
     pub fn move_cursor_left(&mut self, n: usize) {
         let line_number = self.content.char_to_line(self.cursor);
         let beginning_of_line = self.content.line_to_char(line_number);
@@ -233,13 +250,7 @@ impl Buffer {
             return;
         }
 
-        match self.edit_mode {
-            EditMode::Char => self.move_cursor(self.cursor.saturating_sub(n)),
-            EditMode::Line => self.move_cursor(
-                self.content
-                    .line_to_char(self.content.char_to_line(self.cursor)),
-            ),
-        }
+        self.move_cursor(self.cursor.saturating_sub(n));
     }
 
     pub fn move_cursor_right(&mut self, n: usize) {
@@ -248,14 +259,7 @@ impl Buffer {
             return;
         }
 
-        match self.edit_mode {
-            EditMode::Char => self.move_cursor(self.cursor + n),
-            EditMode::Line => self.move_cursor(
-                self.content
-                    .line_to_char(self.content.char_to_line(self.cursor) + 1)
-                    .saturating_sub(1),
-            ),
-        }
+        self.move_cursor(self.cursor + n);
     }
 
     /// will return last char position if line_number >= self.content.len_lines()
@@ -279,16 +283,27 @@ impl Buffer {
     pub fn move_cursor_down(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
-        let dest_cursor = self.content.line_to_char(current_line_number + n) + current_line_offset;
-        self.move_cursor(dest_cursor.min(self.end_of_line(current_line_number + n)));
+        let dest_line_number = current_line_number + n;
+        let dest_cursor = self.content.line_to_char(dest_line_number) + current_line_offset;
+        self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
-        let new_position = cursor.min(self.content.len_chars().saturating_sub(1));
         if self.selection.is_some() {
             self.dirty = true;
         }
-        self.cursor = new_position;
+        let dest_line_number = self.content.char_to_line(cursor);
+        if dest_line_number < self.window.start {
+            let offset = self.window.start - dest_line_number; // at least 1
+            self.window = self.window.start - offset..self.window.end - offset;
+            self.dirty = true;
+        }
+        if dest_line_number > self.window.end {
+            let offset = dest_line_number - self.window.end; // at least 1
+            self.window = self.window.start + offset..self.window.end + offset;
+            self.dirty = true;
+        }
+        self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
     }
 
     pub fn delete(&mut self, n: usize) {

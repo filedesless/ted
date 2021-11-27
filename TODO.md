@@ -3,9 +3,10 @@
 - [ ] undo stack (tree?)
 - [ ] move by word / paragraph / page
 - [ ] remember last col when being moved to left because line too short
+- [ ] line wrapping
 - [-] handle buffers bigger than the screen
   - [x] doesn't panic anymore
-  - [ ] naviguate the large buffer
+  - [ ] extract cursor / size / position of window out of Buffer
 - [-] visual mode
   - [x] highlight selected text
   - [ ] re-implement commands to work on selected text

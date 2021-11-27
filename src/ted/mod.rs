@@ -67,9 +67,9 @@ impl Ted {
     }
 
     pub fn handle_resize(&mut self) -> TRes {
-        self.buffers.focused_mut().dirty = true;
         self.term.autoresize()?;
         self.termsize = self.term.size()?;
+        self.buffers.focused_mut().dirty = true;
         Ok(())
     }
 
@@ -80,38 +80,44 @@ impl Ted {
         let buffer = self.buffers.focused_mut();
         let status_line_number = height.saturating_sub(2);
         let echo_line_number = height.saturating_sub(1);
-        let (cursor, linum, col) = buffer.get_cursor();
+        buffer.window = buffer.window.start..buffer.window.start + status_line_number - 2;
+        let (cursor, line_number, column_number) = buffer.get_cursor();
 
         // Redraw buffer
         // TODO use tui::buffer::Buffer instead of printing to stdout
         if buffer.dirty {
             self.term.hide_cursor()?;
-            let mut line_number = 0;
+            let mut current_line = 0;
             let mut line_length = 0;
-            self.term.set_cursor(0, line_number as u16)?;
+            self.term.set_cursor(0, current_line as u16)?;
             let selection = buffer.get_selection_range();
-            for (i, c) in buffer.get_chars().enumerate() {
-                line_length += 1;
-                if let Some(true) = selection.as_ref().map(|s| i == s.start) {
-                    execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey));
-                }
-                if c == '\n' || line_length >= width {
-                    line_number += 1;
-                    print!("{}", " ".repeat(width.saturating_sub(line_length)));
-                    self.term.set_cursor(0, line_number as u16)?;
-                    line_length = 0;
-                } else {
-                    print!("{}", c);
-                }
-                if let Some(true) = selection.as_ref().map(|s| i == s.end) {
-                    execute!(io::stdout(), SetBackgroundColor(Color::Black));
-                }
-                if line_number == status_line_number {
-                    break;
+            if let Some((chars, first_position)) = buffer.get_chars() {
+                for (offset, character) in chars.enumerate() {
+                    let char_index = first_position + offset;
+                    line_length += 1;
+                    if let Some(true) = selection.as_ref().map(|s| char_index == s.start) {
+                        execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey));
+                    }
+                    if character == '\n' {
+                        current_line += 1;
+                        print!("{}", " ".repeat(width.saturating_sub(line_length)));
+                        self.term.set_cursor(0, current_line as u16)?;
+                        line_length = 0;
+                    } else if line_length >= width {
+                        continue;
+                    } else {
+                        print!("{}", character);
+                    }
+                    if let Some(true) = selection.as_ref().map(|s| char_index == s.end) {
+                        execute!(io::stdout(), SetBackgroundColor(Color::Black));
+                    }
+                    if current_line >= buffer.window.end {
+                        break;
+                    }
                 }
             }
 
-            for i in line_number..status_line_number {
+            for i in current_line..status_line_number {
                 self.term.set_cursor(0, i as u16)?;
                 println!("{}", " ".repeat(width));
             }
@@ -127,14 +133,15 @@ impl Ted {
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
         let line = format!(
-            "{} - {} - ({}x{}) {} {}:{}",
+            "{} - {} - ({}x{} at :{}) {} {}:{}",
             buffer.name,
             status,
             width,
             height,
+            buffer.window.start,
             cursor,
-            linum + 1,
-            col + 1,
+            line_number + 1,
+            column_number + 1,
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
@@ -143,6 +150,8 @@ impl Ted {
             print!("{}{}", line, fill);
             self.status_line = line;
         }
+
+        self.term.set_cursor(column_number as u16, line_number as u16)?;
 
         // Prints out the echo area
         let line = self.minibuffer.get_current_line().unwrap_or_default();
@@ -161,15 +170,10 @@ impl Ted {
             } else {
                 let fill = " ".repeat(self.termsize.width as usize - line.len());
                 print!("{}{}", line, fill);
-                let (_, linum, col) = buffer.get_cursor();
-                let x = self.termsize.x + self.termsize.width.min(col as u16);
-                self.term.set_cursor(x, linum as u16)?;
             }
             self.echo_line = line;
         }
 
-        // Restore cursor
-        self.term.set_cursor(col as u16, linum as u16)?;
         self.term.show_cursor()
     }
 
@@ -346,9 +350,11 @@ impl Ted {
             ' ' => self.space_mode(),
             'i' => self.insert_mode(),
             'h' => self.buffers.focused_mut().move_cursor_left(n),
+            'H' => self.buffers.focused_mut().move_cursor_bol(),
             'j' => self.buffers.focused_mut().move_cursor_down(n),
             'k' => self.buffers.focused_mut().move_cursor_up(n),
             'l' => self.buffers.focused_mut().move_cursor_right(n),
+            'L' => self.buffers.focused_mut().move_cursor_eol(),
             's' => self.buffers.focused_mut().mark_selection(),
             'd' => self.buffers.focused_mut().delete(n),
             'p' => self.buffers.focused_mut().paste(n, &self.clipboard),
