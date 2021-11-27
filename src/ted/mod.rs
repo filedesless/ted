@@ -97,7 +97,6 @@ impl Ted {
                     line_length = 0;
                 } else {
                     print!("{}", c);
-                    line_length += 1;
                 }
                 if line_number == status_line_number {
                     break;
