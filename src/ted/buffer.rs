@@ -1,12 +1,10 @@
 use super::Commands;
 use crate::ted::format_space_chain;
 use ropey::Rope;
-use ropey::RopeSlice;
-use std::collections::LinkedList;
+use ropey::iter::Chars;
 use std::fs::File;
 use std::io;
 use std::io::{Error, ErrorKind};
-use std::ops::{Range, RangeBounds};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -15,10 +13,10 @@ pub struct Buffer {
     pub name: String,
     pub mode: InputMode,
     pub edit_mode: EditMode,
+    pub dirty: bool,
     file: Option<BackendFile>,
     content: Rope,
     cursor: usize, // 0..content.len_chars()
-    changes: LinkedList<Change>,
     selection: Option<usize>,
 }
 
@@ -26,16 +24,6 @@ pub struct Buffer {
 pub struct BackendFile {
     path: String,
     modified: SystemTime,
-}
-
-#[derive(Clone)]
-pub enum Change {
-    /// Indicates a line must be refreshed from the buffer
-    DrawLine(usize), // within 0..lines.len()
-    /// Indicates a line has been added or removed
-    DrawLinesFrom(usize), // can be outside buffer boundaries
-    /// Indicates chars in the range are selected
-    UpdateSelection(Range<usize>),
 }
 
 #[derive(Copy, Clone)]
@@ -91,17 +79,15 @@ impl Default for Buffer {
 impl Buffer {
     /// Basic in-memory buffer
     pub fn new(content: String, name: String) -> Self {
-        let mut changes = LinkedList::new();
-        changes.push_back(Change::DrawLinesFrom(0));
         Self {
             mode: InputMode::Normal,
             edit_mode: EditMode::Char,
             content: Rope::from(content),
             cursor: 0,
-            changes,
             name,
             file: None,
             selection: None,
+            dirty: true,
         }
     }
 
@@ -152,10 +138,6 @@ impl Buffer {
         Buffer::new(String::default(), String::default())
     }
 
-    pub fn get_changes(&self) -> &LinkedList<Change> {
-        &self.changes
-    }
-
     /// returns a non-empty line
     pub fn get_line(&self, linum: usize) -> Option<String> {
         if let Some(line) = self.content.get_line(linum) {
@@ -166,11 +148,8 @@ impl Buffer {
         None
     }
 
-    pub fn get_slice<R>(&self, range: R) -> Option<RopeSlice>
-    where
-        R: RangeBounds<usize>,
-    {
-        self.content.get_slice(range)
+    pub fn get_chars(&self) -> Chars {
+        self.content.chars()
     }
 
     pub fn get_current_line(&self) -> Option<String> {
@@ -202,16 +181,8 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        let old = self.content.len_lines();
         self.content.insert_char(self.cursor, c);
-        if old == self.content.len_lines() {
-            self.changes
-                .push_back(Change::DrawLine(self.content.char_to_line(self.cursor)));
-        } else {
-            self.changes.push_back(Change::DrawLinesFrom(
-                self.content.char_to_line(self.cursor),
-            ));
-        }
+        self.dirty = true;
         self.cursor += 1;
     }
 
@@ -234,11 +205,6 @@ impl Buffer {
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
-    }
-
-    pub fn get_selection_coord(&self) -> Option<(usize, usize)> {
-        self.selection
-            .map(|selection| self.coord_from_pos(selection))
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {
@@ -301,15 +267,9 @@ impl Buffer {
     pub fn move_cursor(&mut self, cursor: usize) {
         let new_position = cursor.min(self.content.len_chars().saturating_sub(1));
         if self.selection.is_some() {
-            let start = self.cursor.min(new_position);
-            let end = self.cursor.max(new_position);
-            self.changes.push_back(Change::UpdateSelection(start..end));
+            self.dirty = true;
         }
         self.cursor = new_position;
-    }
-
-    pub fn clear_changes(&mut self) {
-        self.changes.clear();
     }
 
     pub fn delete(&mut self, n: usize) {
@@ -326,21 +286,13 @@ impl Buffer {
         let end = self.content.line_to_char(end_line_number);
         self.content.remove(start..end);
         self.move_cursor(start);
-        self.changes
-            .push_back(Change::DrawLinesFrom(current_line_number));
+        self.dirty = true;
     }
 
     pub fn delete_chars(&mut self, n: usize) {
-        let start_line_number = self.content.char_to_line(self.cursor);
         let end = self.content.len_chars().min(self.cursor + n);
-        let end_line_number = self.content.char_to_line(end);
         self.content.remove(self.cursor..end);
-        if start_line_number == end_line_number {
-            self.changes.push_back(Change::DrawLine(start_line_number));
-        } else {
-            self.changes
-                .push_back(Change::DrawLinesFrom(start_line_number));
-        }
+        self.dirty = true;
     }
 
     pub fn back_delete_char(&mut self) {
@@ -358,18 +310,10 @@ impl Buffer {
     }
 
     pub fn paste(&mut self, n: usize, text: &String) {
-        let old = self.content.len_lines();
         for _ in 0..n {
             self.content.insert(self.cursor, text);
         }
-        if old == self.content.len_lines() {
-            self.changes
-                .push_back(Change::DrawLine(self.content.char_to_line(self.cursor)));
-        } else {
-            self.changes.push_back(Change::DrawLinesFrom(
-                self.content.char_to_line(self.cursor),
-            ));
-        }
+        self.dirty = true;
     }
 }
 

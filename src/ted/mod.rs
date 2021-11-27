@@ -1,5 +1,3 @@
-use crate::ted::buffer::Change::UpdateSelection;
-use buffer::Change::{DrawLine, DrawLinesFrom};
 use buffer::{Buffer, EditMode, InputMode};
 use buffers::Buffers;
 use command::Commands;
@@ -80,64 +78,40 @@ impl Ted {
     pub fn draw(&mut self) -> TRes {
         self.term.autoresize()?;
         self.termsize = self.term.size()?;
-        let buffer = self.buffers.focused();
+        let buffer = self.buffers.focused_mut();
         let bottom = self.termsize.bottom();
         let status_line_number = bottom.saturating_sub(2);
         let echo_line_number = bottom.saturating_sub(1);
         let width = self.termsize.width as usize;
-        let draw_line = |linum| {
-            if let Some(line) = buffer.get_line(linum) {
-                let s = String::from(line);
-                let trimmed_line = s.trim();
-                if trimmed_line.len() < width {
-                    let fill = " ".repeat(width - trimmed_line.len());
-                    println!("{}{}", trimmed_line, fill);
-                } else {
-                    println!("{}", trimmed_line.get(..width).unwrap());
-                }
-            } else {
-                println!("~{}", " ".repeat(width));
-            }
-        };
 
-        // Update tracked changes
-        let changes = buffer.get_changes();
-        if !changes.is_empty() {
+        // Redraw buffer
+        if buffer.dirty {
             self.term.hide_cursor()?;
-        }
-        for change in buffer.get_changes() {
-            match change {
-                DrawLine(linum) => {
-                    self.term.set_cursor(0, *linum as u16)?;
-                    draw_line(*linum);
+            let mut line_number = 0;
+            let mut line_length = 0;
+            self.term.set_cursor(0, line_number as u16)?;
+            for c in buffer.get_chars() {
+                line_length += 1;
+                if c == '\n' || line_length >= width {
+                    line_number += 1;
+                    print!("{}", " ".repeat(width.saturating_sub(line_length)));
+                    self.term.set_cursor(0, line_number as u16)?;
+                    line_length = 0;
+                } else {
+                    print!("{}", c);
                 }
-                DrawLinesFrom(start_line) => {
-                    for line_number in *start_line..(status_line_number as usize) {
-                        self.term.set_cursor(0, line_number as u16)?;
-                        draw_line(line_number);
-                    }
-                }
-                UpdateSelection(range) => {
-                    let (mut y, x) = buffer.coord_from_pos(range.start);
-                    self.term.set_cursor(x as u16, y as u16)?;
-                    execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey))?;
-                    if let Some(slice) = buffer.get_slice(range.clone()) {
-                        for c in slice.chars() {
-                            if c == '\n' {
-                                y += 1;
-                                self.term.set_cursor(0, y as u16)?;
-                            } else {
-                                print!("{}", c);
-                            }
-                        }
-                    }
-                    execute!(io::stdout(), SetBackgroundColor(Color::Black))?;
+                if line_number == status_line_number {
+                    break
                 }
             }
-        }
 
-        let buffer = self.buffers.focused_mut();
-        buffer.clear_changes();
+            for i in line_number..status_line_number {
+                self.term.set_cursor(0, i as u16)?;
+                println!("{}", " ".repeat(width));
+            }
+
+            buffer.dirty = false;
+        }
 
         // Prints out the status message
         let status = match (buffer.mode, buffer.edit_mode) {
@@ -185,18 +159,10 @@ impl Ted {
                 self.term.set_cursor(x, linum as u16)?;
             }
             self.echo_line = line;
-            self.minibuffer.clear_changes();
-        }
-
-        // Apply selection
-        if let Some((line_number, column_number)) = buffer.get_selection_coord() {
-            self.term.set_cursor(column_number as u16, line_number as u16)?;
-            execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey)).unwrap();
         }
 
         // Restore cursor
         self.term.set_cursor(col as u16, linum as u16)?;
-        execute!(io::stdout(), SetBackgroundColor(Color::Black)).unwrap();
         self.term.show_cursor()
     }
 
@@ -238,12 +204,14 @@ impl Ted {
         self.minibuffer.set_current_line(msg);
     }
 
-    // TODO: trigger a redraw
     fn next_buffer(&mut self) {
-        let _ = self.term.clear();
-        self.buffers.cycle_next();
-        let message = format!("Switched to <{}>", self.buffers.focused().name);
-        self.minibuffer.set_current_line(message.to_string());
+        if self.buffers.len() > 1 {
+            let _ = self.term.clear();
+            self.buffers.cycle_next();
+            self.buffers.focused_mut().dirty = true;
+            let message = format!("Switched to <{}>", self.buffers.focused().name);
+            self.minibuffer.set_current_line(message.to_string());
+        }
     }
 
     fn insert_mode(&mut self) {
