@@ -1,7 +1,7 @@
 use super::Commands;
 use crate::ted::format_space_chain;
-use ropey::Rope;
 use ropey::iter::Chars;
+use ropey::Rope;
 use std::fs::File;
 use std::io;
 use std::io::{Error, ErrorKind};
@@ -175,6 +175,7 @@ impl Buffer {
         (line_number, pos.saturating_sub(beginning_of_line))
     }
 
+    /// returns (cursor, column_number, line_number)
     pub fn get_cursor(&self) -> (usize, usize, usize) {
         let (x, y) = self.coord_from_pos(self.cursor);
         (self.cursor, x, y)
@@ -205,6 +206,10 @@ impl Buffer {
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
+    }
+
+    pub fn get_selection(&self) -> Option<usize> {
+        self.selection
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {

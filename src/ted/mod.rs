@@ -80,6 +80,7 @@ impl Ted {
         let buffer = self.buffers.focused_mut();
         let status_line_number = height.saturating_sub(2);
         let echo_line_number = height.saturating_sub(1);
+        let (cursor, linum, col) = buffer.get_cursor();
 
         // Redraw buffer
         // TODO use tui::buffer::Buffer instead of printing to stdout
@@ -88,8 +89,12 @@ impl Ted {
             let mut line_number = 0;
             let mut line_length = 0;
             self.term.set_cursor(0, line_number as u16)?;
-            for c in buffer.get_chars() {
+            let selection = buffer.get_selection();
+            for (i, c) in buffer.get_chars().enumerate() {
                 line_length += 1;
+                if let Some(true) = selection.map(|s| s.min(cursor) == i) {
+                    execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey));
+                }
                 if c == '\n' || line_length >= width {
                     line_number += 1;
                     print!("{}", " ".repeat(width.saturating_sub(line_length)));
@@ -97,6 +102,9 @@ impl Ted {
                     line_length = 0;
                 } else {
                     print!("{}", c);
+                }
+                if let Some(true) = selection.map(|s| s.max(cursor) == i) {
+                    execute!(io::stdout(), SetBackgroundColor(Color::Black));
                 }
                 if line_number == status_line_number {
                     break;
@@ -118,14 +126,13 @@ impl Ted {
             (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
-        let (pos, linum, col) = buffer.get_cursor();
         let line = format!(
             "{} - {} - ({}x{}) {} {}:{}",
             buffer.name,
             status,
             width,
             height,
-            pos,
+            cursor,
             linum + 1,
             col + 1,
         );
