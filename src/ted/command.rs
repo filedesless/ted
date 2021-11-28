@@ -64,6 +64,18 @@ impl Default for Commands {
                     chain: Some(" \t".to_string()),
                     action: Ted::next_buffer,
                 },
+                Command {
+                    name: "help_syntax".to_string(),
+                    desc: "Shows supported syntaxes for highlighting".to_string(),
+                    chain: Some(" hs".to_string()),
+                    action: Ted::help_syntax,
+                },
+                Command {
+                    name: "help_theme".to_string(),
+                    desc: "Shows supported themes for highlighting".to_string(),
+                    chain: Some(" ht".to_string()),
+                    action: Ted::help_theme,
+                },
             ],
         }
     }

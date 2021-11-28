@@ -8,6 +8,10 @@ use std::io::{Error, ErrorKind};
 use std::ops::Range;
 use std::path::Path;
 use std::time::SystemTime;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
+use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
 pub struct Buffer {
     pub name: String,
@@ -19,6 +23,9 @@ pub struct Buffer {
     content: Rope,
     cursor: usize, // 0..content.len_chars()
     selection: Option<usize>,
+    syntax_set: SyntaxSet,
+    theme_set: ThemeSet,
+    highlighted_lines: Option<Vec<(String, usize)>>,
 }
 
 pub struct BackendFile {
@@ -89,6 +96,9 @@ impl Buffer {
             selection: None,
             dirty: true,
             window: 0..1,
+            syntax_set: SyntaxSet::load_defaults_newlines(),
+            theme_set: ThemeSet::load_defaults(),
+            highlighted_lines: None,
         }
     }
 
@@ -149,6 +159,36 @@ impl Buffer {
         None
     }
 
+    pub fn get_highlighted_lines(&mut self) -> Vec<(String, usize)> {
+        if self.highlighted_lines.is_none() {
+            let from_ext = self
+                .file
+                .as_ref()
+                .and_then(|file| Path::new(&file.path).extension())
+                .and_then(|e| e.to_str())
+                .and_then(|extension| self.syntax_set.find_syntax_by_extension(extension));
+            let from_line = self
+                .content
+                .get_line(0)
+                .and_then(|line| self.syntax_set.find_syntax_by_first_line(&line.to_string()));
+            let syntax = from_ext
+                .or(from_line)
+                .unwrap_or(self.syntax_set.find_syntax_plain_text());
+
+            let mut highlighter =
+                HighlightLines::new(syntax, &self.theme_set.themes["base16-eighties.dark"]);
+            let highlighted_lines = LinesWithEndings::from(&String::from(self.content.clone()))
+                .map(|line| {
+                    let s = &line.to_string();
+                    let ranges = highlighter.highlight(s, &self.syntax_set);
+                    (as_24_bit_terminal_escaped(&ranges[..], true), line.len())
+                })
+                .collect();
+            self.highlighted_lines = Some(highlighted_lines);
+        }
+        self.highlighted_lines.as_ref().unwrap().clone()
+    }
+
     pub fn resize_window(&mut self, height: usize) {
         self.window.end = self.window.start + height;
         if self.content.char_to_line(self.cursor) >= self.window.end {
@@ -202,6 +242,7 @@ impl Buffer {
     pub fn insert_char(&mut self, c: char) {
         self.content.insert_char(self.cursor, c);
         self.dirty = true;
+        self.highlighted_lines = None;
         self.cursor += 1;
     }
 
@@ -307,11 +348,13 @@ impl Buffer {
             let offset = self.window.start - dest_line_number; // at least 1
             self.window = self.window.start - offset..self.window.end - offset;
             self.dirty = true;
+            self.highlighted_lines = None;
         }
         if dest_line_number >= self.window.end {
             let offset = dest_line_number - self.window.end + 1; // at least 1
             self.window = (self.window.start + offset)..(self.window.end + offset);
             self.dirty = true;
+            self.highlighted_lines = None;
         }
         self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
     }
@@ -319,7 +362,6 @@ impl Buffer {
     pub fn page_up(&mut self, n: usize) {
         let height = self.window.end - self.window.start;
         self.move_cursor_up((height / 2) * n);
-
     }
 
     pub fn page_down(&mut self, n: usize) {
@@ -342,12 +384,14 @@ impl Buffer {
         self.content.remove(start..end);
         self.move_cursor(start);
         self.dirty = true;
+        self.highlighted_lines = None;
     }
 
     pub fn delete_chars(&mut self, n: usize) {
         let end = self.content.len_chars().min(self.cursor + n);
         self.content.remove(self.cursor..end);
         self.dirty = true;
+        self.highlighted_lines = None;
     }
 
     pub fn back_delete_char(&mut self) {
@@ -370,6 +414,7 @@ impl Buffer {
             self.content.insert(self.cursor, text);
         }
         self.dirty = true;
+        self.highlighted_lines = None;
     }
 }
 

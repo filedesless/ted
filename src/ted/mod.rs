@@ -5,9 +5,12 @@ use crossterm::cursor::{CursorShape, SetCursorShape};
 use crossterm::event::KeyCode;
 use crossterm::event::{KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::style::{Color, SetBackgroundColor};
-
+use crossterm::style::{Color, SetForegroundColor};
+use serde_json::json;
+use serde_json::value::Value;
 use std::io;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
 use tui::Terminal;
@@ -89,39 +92,21 @@ impl Ted {
         if buffer.dirty {
             self.term.hide_cursor()?;
             let mut current_line = 0;
-            let mut line_length = 0;
-            self.term.set_cursor(0, current_line as u16)?;
-            let selection = buffer.get_selection_range();
-            if let Some((chars, first_position)) = buffer.get_chars() {
-                for (offset, character) in chars.enumerate() {
-                    let char_index = first_position + offset;
-                    line_length += 1;
-                    if let Some(true) = selection.as_ref().map(|s| char_index == s.start) {
-                        execute!(io::stdout(), SetBackgroundColor(Color::DarkGrey))?;
-                    }
-                    if character == '\n' {
-                        current_line += 1;
-                        print!("{}", " ".repeat(width.saturating_sub(line_length)));
-                        self.term.set_cursor(0, current_line as u16)?;
-                        line_length = 0;
-                    } else if line_length >= width {
-                        continue;
-                    } else {
-                        print!("{}", character);
-                    }
-                    if let Some(true) = selection.as_ref().map(|s| char_index == s.end) {
-                        execute!(io::stdout(), SetBackgroundColor(Color::Black))?;
-                    }
-                    if current_line >= status_line_number {
-                        break;
-                    }
-                }
+            let lines = buffer.get_highlighted_lines();
+            let window = buffer.get_window();
+            for (line, len) in lines.iter().skip(window.start).take(window.len()) {
+                self.term.set_cursor(0, current_line as u16)?;
+                let trimmed = line.trim();
+                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(*len)));
+                current_line += 1;
             }
 
             for i in current_line..status_line_number {
                 self.term.set_cursor(0, i as u16)?;
                 println!("{}", " ".repeat(width));
             }
+
+            execute!(io::stdout(), SetForegroundColor(Color::Reset))?;
 
             buffer.dirty = false;
         }
@@ -175,10 +160,8 @@ impl Ted {
             self.echo_line = line;
         }
 
-        self.term.set_cursor(
-            column_number as u16,
-            (line_number - window.start) as u16,
-        )?;
+        self.term
+            .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
         self.term.show_cursor()
     }
 
@@ -345,6 +328,37 @@ impl Ted {
             };
         }
         self.exit
+    }
+
+    fn help_syntax(&mut self) {
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let obj: Vec<Value> = syntax_set
+            .syntaxes()
+            .iter()
+            .map(|syntax| json!({
+                "name": syntax.name,
+                "ext": syntax.file_extensions,
+                "first_line": syntax.first_line_match,
+            }))
+            .collect();
+        if let Ok(json) = serde_json::to_string_pretty(&obj) {
+            self.new_buffer(json);
+        }
+    }
+
+    fn help_theme(&mut self) {
+        let theme_set = ThemeSet::load_defaults();
+        let obj: Vec<Value> = theme_set.themes.iter()
+            .map(|(name, theme)| json!({
+                "name": name,
+                "theme": {
+                    "name": theme.name,
+                }
+            }))
+            .collect();
+        if let Ok(json) = serde_json::to_string_pretty(&obj) {
+            self.new_buffer(json);
+        }
     }
 
     fn normal_mode_handle_key(&mut self, c: char) {
