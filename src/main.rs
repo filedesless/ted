@@ -16,8 +16,8 @@ fn run() -> Result<(), io::Error> {
     let mut terminal = Terminal::new(backend)?;
 
     enable_raw_mode().expect("Failed to enable raw mode");
-    terminal.clear()?;
     execute!(io::stdout(), EnterAlternateScreen)?;
+    terminal.clear()?;
 
     let size = terminal.size()?;
 
