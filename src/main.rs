@@ -21,7 +21,7 @@ fn run() -> Result<(), io::Error> {
 
     let size = terminal.size()?;
 
-    let mut ted = Ted::new(terminal, size.clone());
+    let mut ted = Ted::new(terminal, size);
 
     for argument in env::args().skip(1) {
         println!("{}", argument);
@@ -56,8 +56,8 @@ fn main() -> Result<(), io::Error> {
         default_panic(panic_info);
     }));
 
-    run().or_else(|err| {
+    run().map_err(|err| {
         println!("main returned an error: {}", err);
-        Err(err)
+        err
     })
 }

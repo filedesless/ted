@@ -12,7 +12,7 @@ impl Command {
         self.action
     }
 
-    pub fn chain_is(&self, other: &String) -> bool {
+    pub fn chain_is(&self, other: &str) -> bool {
         self.chain
             .as_ref()
             .map(|chain| chain == other)
@@ -94,21 +94,21 @@ impl Default for Commands {
 }
 
 impl Commands {
-    pub fn get_by_chain(&self, prefix: &String) -> Vec<&Command> {
+    pub fn get_by_chain(&self, prefix: &str) -> Vec<&Command> {
         self.commands
             .iter()
             .filter(|command| {
                 if let Some(chain) = &command.chain {
-                    return chain.starts_with(prefix);
-                } else {
-                    return false;
+                    chain.starts_with(prefix)
+                } else{
+                    false
                 }
             })
             .collect()
     }
 
-    pub fn get_by_name(&self, needle: &String) -> Option<&Command> {
-        self.commands.iter().find(|command| &command.name == needle)
+    pub fn get_by_name(&self, needle: &str) -> Option<&Command> {
+        self.commands.iter().find(|command| command.name == needle)
     }
 }
 

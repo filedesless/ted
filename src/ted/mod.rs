@@ -24,7 +24,7 @@ type TTerm = Terminal<CrosstermBackend<io::Stdout>>;
 
 type TRes = Result<(), io::Error>;
 
-fn format_space_chain(space_chain: &String) -> String {
+fn format_space_chain(space_chain: &str) -> String {
     let v: Vec<String> = space_chain
         .chars()
         .map(|c| match c {
@@ -187,7 +187,7 @@ impl Ted {
             self.syntax_set.clone(),
             self.theme_set.clone(),
         ));
-        self.minibuffer.set_current_line(String::from(message));
+        self.minibuffer.set_current_line(message);
     }
 
     fn run_command(&mut self, command: String) {
@@ -227,7 +227,7 @@ impl Ted {
             self.buffers.cycle_next();
             self.buffers.focused_mut().dirty = true;
             let message = format!("Switched to <{}>", self.buffers.focused().name);
-            self.minibuffer.set_current_line(message.to_string());
+            self.minibuffer.set_current_line(message);
         }
     }
 
@@ -299,7 +299,7 @@ impl Ted {
         } else if !self.prompt.is_empty() {
             match key.code {
                 KeyCode::Enter => {
-                    let line = self.minibuffer.get_current_line().unwrap().to_string();
+                    let line = self.minibuffer.get_current_line().unwrap();
                     self.normal_mode();
                     self.prompt = String::default();
                     if let Some(f) = self.prompt_callback {

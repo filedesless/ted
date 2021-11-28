@@ -106,7 +106,7 @@ impl Buffer {
                     .chain
                     .as_ref()
                     .map(|chain| format_space_chain(chain))
-                    .unwrap_or("unbound".to_string()),
+                    .unwrap_or_else(|| "unbound".to_string()),
                 command.desc
             );
             message.push_str(&line);
@@ -118,7 +118,7 @@ impl Buffer {
 
     /// Buffer with a backend file to save to
     pub fn from_file(
-        path: &String,
+        path: &str,
         syntax_set: Rc<SyntaxSet>,
         theme_set: Rc<ThemeSet>,
     ) -> io::Result<Self> {
@@ -192,11 +192,11 @@ impl Buffer {
             .as_ref()
             .or(from_ext)
             .or(from_line)
-            .unwrap_or(self.syntax_set.find_syntax_plain_text())
+            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
     }
 
-    pub fn set_language(&mut self, language: &String) -> bool {
-        if let Some(syntax) = self.syntax_set.find_syntax_by_name(&language) {
+    pub fn set_language(&mut self, language: &str) -> bool {
+        if let Some(syntax) = self.syntax_set.find_syntax_by_name(language) {
             self.syntax = Some(syntax.clone());
             self.highlighted_lines = None;
             self.dirty = true;
@@ -213,7 +213,7 @@ impl Buffer {
             .to_string()
     }
 
-    pub fn set_theme(&mut self, name: &String) -> bool {
+    pub fn set_theme(&mut self, name: &str) -> bool {
         if let Some(theme) = self.theme_set.themes.get(name) {
             self.theme = theme.clone();
             self.highlighted_lines = None;
@@ -302,11 +302,8 @@ impl Buffer {
     }
 
     pub fn normal_mode(&mut self) {
-        match self.mode {
-            InputMode::Insert => {
-                self.mode = InputMode::Normal;
-            }
-            _ => {}
+        if let InputMode::Insert = self.mode {
+            self.mode = InputMode::Normal;
         }
     }
 
@@ -460,7 +457,7 @@ impl Buffer {
         }
     }
 
-    pub fn paste(&mut self, n: usize, text: &String) {
+    pub fn paste(&mut self, n: usize, text: &str) {
         for _ in 0..n {
             self.content.insert(self.cursor, text);
         }
