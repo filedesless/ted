@@ -9,6 +9,7 @@ use crossterm::style::{Color, SetForegroundColor};
 use serde_json::json;
 use serde_json::value::Value;
 use std::io;
+use std::rc::Rc;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use tui::backend::CrosstermBackend;
@@ -49,14 +50,18 @@ pub struct Ted {
     clipboard: String,
     status_line: String,
     echo_line: String,
+    syntax_set: Rc<SyntaxSet>,
+    theme_set: Rc<ThemeSet>,
 }
 
 impl Ted {
     pub fn new(terminal: TTerm, termsize: Rect) -> Ted {
+        let syntax_set = Rc::new(SyntaxSet::load_defaults_newlines());
+        let theme_set = Rc::new(ThemeSet::load_defaults());
         Ted {
             term: terminal,
-            buffers: Buffers::default(),
-            minibuffer: Buffer::empty(),
+            buffers: Buffers::home(syntax_set.clone(), theme_set.clone()),
+            minibuffer: Buffer::empty(syntax_set.clone(), theme_set.clone()),
             exit: false,
             prompt: String::default(),
             termsize,
@@ -67,6 +72,8 @@ impl Ted {
             clipboard: String::default(),
             status_line: String::default(),
             echo_line: String::from(" "),
+            syntax_set,
+            theme_set,
         }
     }
 
@@ -174,7 +181,12 @@ impl Ted {
         let _ = self.term.clear();
         let name = format!("Buffer #{}", self.buffers.len() + 1);
         let message = format!("Created new buffer <{}>", name);
-        self.buffers.new_buffer(Buffer::new(content, name));
+        self.buffers.new_buffer(Buffer::new(
+            content,
+            name,
+            self.syntax_set.clone(),
+            self.theme_set.clone(),
+        ));
         self.minibuffer.set_current_line(String::from(message));
     }
 
@@ -189,7 +201,8 @@ impl Ted {
 
     pub fn file_open(&mut self, filepath: String) {
         let _ = self.term.clear();
-        let message = match Buffer::from_file(&filepath) {
+        let buffer = Buffer::from_file(&filepath, self.syntax_set.clone(), self.theme_set.clone());
+        let message = match buffer {
             Ok(buffer) => {
                 let message = format!("Created new buffer <{}>", buffer.name);
                 self.buffers.new_buffer(buffer);

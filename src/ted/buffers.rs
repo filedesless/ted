@@ -1,19 +1,20 @@
 use super::buffer::Buffer;
 use std::collections::VecDeque;
+use std::rc::Rc;
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 
 pub struct Buffers {
     buffers: VecDeque<Buffer>,
 }
 
-impl Default for Buffers {
-    fn default() -> Self {
-        let mut buffers = VecDeque::default();
-        buffers.push_back(Buffer::default());
-        Buffers { buffers }
-    }
-}
-
 impl Buffers {
+    /// singleton of the home buffer
+    pub fn home(syntax_set: Rc<SyntaxSet>, theme_set: Rc<ThemeSet>) -> Self {
+        Self {
+            buffers: VecDeque::from(vec![Buffer::home(syntax_set, theme_set)]),
+        }
+    }
 
     pub fn focused(&self) -> &Buffer {
         self.buffers.front().unwrap()
