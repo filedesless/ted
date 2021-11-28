@@ -120,7 +120,7 @@ impl Ted {
         };
         let window = buffer.get_window();
         let line = format!(
-            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {} ({})",
+            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {} ({} - {})",
             buffer.name,
             status,
             width,
@@ -130,7 +130,8 @@ impl Ted {
             column_number,
             window.start,
             window.end,
-            buffer.get_syntax().name
+            buffer.get_syntax().name,
+            buffer.get_theme(),
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
@@ -334,7 +335,7 @@ impl Ted {
         self.exit
     }
 
-    fn help_syntax(&mut self) {
+    fn help_lang(&mut self) {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let obj: Vec<Value> = syntax_set
             .syntaxes()
@@ -349,7 +350,16 @@ impl Ted {
             .collect();
         if let Ok(json) = serde_json::to_string_pretty(&obj) {
             self.new_buffer(json);
-            self.buffers.focused_mut().set_language(String::from("JSON"));
+            self.buffers
+                .focused_mut()
+                .set_language(&String::from("JSON"));
+        }
+    }
+
+    fn set_lang(&mut self, name: String) {
+        if !self.buffers.focused_mut().set_language(&name) {
+            let msg = format!("Could not load lang {}", name);
+            self.minibuffer.set_current_line(msg);
         }
     }
 
@@ -362,14 +372,23 @@ impl Ted {
                 json!({
                     "name": name,
                     "theme": {
-                        "name": theme.name,
+                        "prettyName": theme.name
                     }
                 })
             })
             .collect();
         if let Ok(json) = serde_json::to_string_pretty(&obj) {
             self.new_buffer(json);
-            self.buffers.focused_mut().set_language(String::from("JSON"));
+            self.buffers
+                .focused_mut()
+                .set_language(&String::from("JSON"));
+        }
+    }
+
+    fn set_theme(&mut self, name: String) {
+        if !self.buffers.focused_mut().set_theme(&name) {
+            let msg = format!("Could not load theme {}", name);
+            self.minibuffer.set_current_line(msg);
         }
     }
 

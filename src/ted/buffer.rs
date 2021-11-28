@@ -9,10 +9,13 @@ use std::ops::Range;
 use std::path::Path;
 use std::time::SystemTime;
 use syntect::easy::HighlightLines;
+use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
 use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
+
+const DEFAULT_THEME: &str = "base16-eighties.dark";
 
 pub struct Buffer {
     pub name: String,
@@ -28,6 +31,7 @@ pub struct Buffer {
     theme_set: ThemeSet,
     highlighted_lines: Option<Vec<(String, usize)>>,
     syntax: Option<SyntaxReference>,
+    theme: Theme,
 }
 
 pub struct BackendFile {
@@ -82,7 +86,7 @@ impl Default for Buffer {
             message.push_str(&line);
         }
         let mut buffer = Buffer::new(message, String::from("Buffer #1"));
-        buffer.set_language("Markdown".to_string());
+        buffer.set_language(&"Markdown".to_string());
         buffer
     }
 }
@@ -90,6 +94,8 @@ impl Default for Buffer {
 impl Buffer {
     /// Basic in-memory buffer
     pub fn new(content: String, name: String) -> Self {
+        let theme_set = ThemeSet::load_defaults();
+        let theme = theme_set.themes[DEFAULT_THEME].clone();
         Self {
             mode: InputMode::Normal,
             edit_mode: EditMode::Char,
@@ -101,9 +107,10 @@ impl Buffer {
             dirty: true,
             window: 0..1,
             syntax_set: SyntaxSet::load_defaults_newlines(),
-            theme_set: ThemeSet::load_defaults(),
+            theme_set,
             highlighted_lines: None,
             syntax: None,
+            theme,
         }
     }
 
@@ -182,18 +189,39 @@ impl Buffer {
             .unwrap_or(self.syntax_set.find_syntax_plain_text())
     }
 
-    pub fn set_language(&mut self, language: String) {
+    pub fn set_language(&mut self, language: &String) -> bool{
         if let Some(syntax) = self.syntax_set.find_syntax_by_name(&language) {
             self.syntax = Some(syntax.clone());
+            self.highlighted_lines = None;
+            self.dirty = true;
+            return true
         }
+        false
+    }
+
+    pub fn get_theme(&self) -> String {
+        self.theme
+            .name
+            .as_ref()
+            .unwrap_or(&DEFAULT_THEME.to_string())
+            .to_string()
+    }
+
+    pub fn set_theme(&mut self, name: &String) -> bool{
+        if let Some(theme) = self.theme_set.themes.get(name) {
+            self.theme = theme.clone();
+            self.highlighted_lines = None;
+            self.dirty = true;
+            return true
+        }
+        false
     }
 
     pub fn get_highlighted_lines(&mut self) -> Vec<(String, usize)> {
         if self.highlighted_lines.is_none() {
             let syntax = self.get_syntax();
 
-            let mut highlighter =
-                HighlightLines::new(syntax, &self.theme_set.themes["base16-eighties.dark"]);
+            let mut highlighter = HighlightLines::new(syntax, &self.theme);
             let highlighted_lines = LinesWithEndings::from(&String::from(self.content.clone()))
                 .map(|line| {
                     let s = &line.to_string();

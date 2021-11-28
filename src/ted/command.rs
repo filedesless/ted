@@ -65,16 +65,28 @@ impl Default for Commands {
                     action: Ted::next_buffer,
                 },
                 Command {
-                    name: "help_syntax".to_string(),
-                    desc: "Shows supported syntaxes for highlighting".to_string(),
-                    chain: Some(" hs".to_string()),
-                    action: Ted::help_syntax,
+                    name: "help_lang".to_string(),
+                    desc: "Shows supported languages for highlighting".to_string(),
+                    chain: Some(" hl".to_string()),
+                    action: Ted::help_lang,
                 },
                 Command {
                     name: "help_theme".to_string(),
                     desc: "Shows supported themes for highlighting".to_string(),
                     chain: Some(" ht".to_string()),
                     action: Ted::help_theme,
+                },
+                Command {
+                    name: "set_lang".to_string(),
+                    desc: "Select a language for syntax highlighting".to_string(),
+                    chain: Some(" sl".to_string()),
+                    action: (|t| t.prompt_mode("Lang".to_string(), Ted::set_lang)),
+                },
+                Command {
+                    name: "set_theme".to_string(),
+                    desc: "Select a display theme".to_string(),
+                    chain: Some(" st".to_string()),
+                    action: (|t| t.prompt_mode("Theme".to_string(), Ted::set_theme)),
                 },
             ],
         }
