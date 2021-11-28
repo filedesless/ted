@@ -66,7 +66,7 @@ impl Ted {
             universal_argument: None,
             clipboard: String::default(),
             status_line: String::default(),
-            echo_line: String::default(),
+            echo_line: String::from(" "),
         }
     }
 
@@ -103,7 +103,7 @@ impl Ted {
 
             for i in current_line..status_line_number {
                 self.term.set_cursor(0, i as u16)?;
-                println!("{}", " ".repeat(width));
+                print!("{}", " ".repeat(width));
             }
 
             execute!(io::stdout(), SetForegroundColor(Color::Reset))?;
@@ -120,7 +120,7 @@ impl Ted {
         };
         let window = buffer.get_window();
         let line = format!(
-            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {}",
+            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {} ({})",
             buffer.name,
             status,
             width,
@@ -130,6 +130,7 @@ impl Ted {
             column_number,
             window.start,
             window.end,
+            buffer.get_syntax().name
         );
         if line != self.status_line {
             self.term.hide_cursor()?;
@@ -156,12 +157,15 @@ impl Ted {
             } else {
                 let fill = " ".repeat(self.termsize.width as usize - line.len());
                 print!("{}{}", line, fill);
+                self.term
+                    .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
             }
             self.echo_line = line;
+        } else {
+            self.term
+                .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
         }
 
-        self.term
-            .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
         self.term.show_cursor()
     }
 
@@ -335,29 +339,37 @@ impl Ted {
         let obj: Vec<Value> = syntax_set
             .syntaxes()
             .iter()
-            .map(|syntax| json!({
-                "name": syntax.name,
-                "ext": syntax.file_extensions,
-                "first_line": syntax.first_line_match,
-            }))
+            .map(|syntax| {
+                json!({
+                    "name": syntax.name,
+                    "ext": syntax.file_extensions,
+                    "first_line": syntax.first_line_match,
+                })
+            })
             .collect();
         if let Ok(json) = serde_json::to_string_pretty(&obj) {
             self.new_buffer(json);
+            self.buffers.focused_mut().set_language(String::from("JSON"));
         }
     }
 
     fn help_theme(&mut self) {
         let theme_set = ThemeSet::load_defaults();
-        let obj: Vec<Value> = theme_set.themes.iter()
-            .map(|(name, theme)| json!({
-                "name": name,
-                "theme": {
-                    "name": theme.name,
-                }
-            }))
+        let obj: Vec<Value> = theme_set
+            .themes
+            .iter()
+            .map(|(name, theme)| {
+                json!({
+                    "name": name,
+                    "theme": {
+                        "name": theme.name,
+                    }
+                })
+            })
             .collect();
         if let Ok(json) = serde_json::to_string_pretty(&obj) {
             self.new_buffer(json);
+            self.buffers.focused_mut().set_language(String::from("JSON"));
         }
     }
 

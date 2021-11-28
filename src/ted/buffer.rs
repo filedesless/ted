@@ -10,6 +10,7 @@ use std::path::Path;
 use std::time::SystemTime;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
 use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
@@ -26,6 +27,7 @@ pub struct Buffer {
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
     highlighted_lines: Option<Vec<(String, usize)>>,
+    syntax: Option<SyntaxReference>,
 }
 
 pub struct BackendFile {
@@ -79,7 +81,9 @@ impl Default for Buffer {
             );
             message.push_str(&line);
         }
-        Buffer::new(message, String::from("Buffer #1"))
+        let mut buffer = Buffer::new(message, String::from("Buffer #1"));
+        buffer.set_language("Markdown".to_string());
+        buffer
     }
 }
 
@@ -99,6 +103,7 @@ impl Buffer {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
             highlighted_lines: None,
+            syntax: None,
         }
     }
 
@@ -159,21 +164,33 @@ impl Buffer {
         None
     }
 
+    pub fn get_syntax(&self) -> &SyntaxReference {
+        let from_ext = self
+            .file
+            .as_ref()
+            .and_then(|file| Path::new(&file.path).extension())
+            .and_then(|e| e.to_str())
+            .and_then(|extension| self.syntax_set.find_syntax_by_extension(extension));
+        let from_line = self
+            .content
+            .get_line(0)
+            .and_then(|line| self.syntax_set.find_syntax_by_first_line(&line.to_string()));
+        self.syntax
+            .as_ref()
+            .or(from_ext)
+            .or(from_line)
+            .unwrap_or(self.syntax_set.find_syntax_plain_text())
+    }
+
+    pub fn set_language(&mut self, language: String) {
+        if let Some(syntax) = self.syntax_set.find_syntax_by_name(&language) {
+            self.syntax = Some(syntax.clone());
+        }
+    }
+
     pub fn get_highlighted_lines(&mut self) -> Vec<(String, usize)> {
         if self.highlighted_lines.is_none() {
-            let from_ext = self
-                .file
-                .as_ref()
-                .and_then(|file| Path::new(&file.path).extension())
-                .and_then(|e| e.to_str())
-                .and_then(|extension| self.syntax_set.find_syntax_by_extension(extension));
-            let from_line = self
-                .content
-                .get_line(0)
-                .and_then(|line| self.syntax_set.find_syntax_by_first_line(&line.to_string()));
-            let syntax = from_ext
-                .or(from_line)
-                .unwrap_or(self.syntax_set.find_syntax_plain_text());
+            let syntax = self.get_syntax();
 
             let mut highlighter =
                 HighlightLines::new(syntax, &self.theme_set.themes["base16-eighties.dark"]);
