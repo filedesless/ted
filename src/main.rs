@@ -44,8 +44,7 @@ fn run() -> Result<(), io::Error> {
     }
 
     disable_raw_mode().expect("Failed to disable raw mode");
-    execute!(io::stdout(), LeaveAlternateScreen)?;
-    Ok(())
+    execute!(io::stdout(), LeaveAlternateScreen)
 }
 
 fn main() -> Result<(), io::Error> {
@@ -57,7 +56,9 @@ fn main() -> Result<(), io::Error> {
     }));
 
     run().map_err(|err| {
-        println!("main returned an error: {}", err);
+        disable_raw_mode().unwrap();
+        execute!(io::stdout(), LeaveAlternateScreen).unwrap();
+        println!("main returned an error: {:?}", err);
         err
     })
 }

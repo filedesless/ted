@@ -4,8 +4,11 @@
 - [ ] move by word / paragraph / page
 - [ ] remember last col when being moved to left because line too short
 - [ ] line wrapping
+- [ ] make highlighting async
+  - [ ] don't have to re-highlight everything on every change to the buffer  (https://github.com/trishume/syntect#caching)
 - [-] visual mode
-  - [x] highlight selected text
+  - [~] highlight selected text
+    - died when integrating syntect
   - [ ] re-implement commands to work on selected text
 - [x] handle buffers bigger than the screen
   - [x] doesn't panic anymore
