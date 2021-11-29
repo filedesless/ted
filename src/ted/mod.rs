@@ -143,8 +143,8 @@ impl Ted {
         if line != self.status_line {
             self.term.hide_cursor()?;
             self.term.set_cursor(0, status_line_number as u16)?;
-            let fill = " ".repeat(self.termsize.width as usize - line.len());
-            print!("{}{}", line, fill);
+            let fill = " ".repeat((self.termsize.width as usize).saturating_sub(line.len()));
+            print!("{}{}", line.chars().take(width).collect::<String>(), fill);
             self.status_line = line;
         }
 
@@ -164,7 +164,7 @@ impl Ted {
                 )?;
             } else {
                 let fill = " ".repeat(self.termsize.width as usize - line.len());
-                print!("{}{}", line, fill);
+                print!("{}{}", line.chars().take(width).collect::<String>(), fill);
                 self.term
                     .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
             }
