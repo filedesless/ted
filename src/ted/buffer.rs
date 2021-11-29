@@ -396,13 +396,11 @@ impl Buffer {
             let offset = self.window.start - dest_line_number; // at least 1
             self.window = self.window.start - offset..self.window.end - offset;
             self.dirty = true;
-            self.highlighted_lines = None;
         }
         if dest_line_number >= self.window.end {
             let offset = dest_line_number - self.window.end + 1; // at least 1
             self.window = (self.window.start + offset)..(self.window.end + offset);
             self.dirty = true;
-            self.highlighted_lines = None;
         }
         self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
     }
