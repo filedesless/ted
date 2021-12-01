@@ -64,6 +64,7 @@ impl CachedHighlighter {
         } else {
             // get latest good state from cache
             let (line_number, (mut parse_state, mut highlight_state)) = self.latest_state();
+            self.highlighted_lines.truncate(line_number);
             let highlighter = Highlighter::new(&self.theme);
 
             // work on self.content
@@ -71,7 +72,7 @@ impl CachedHighlighter {
                 .lines()
                 .enumerate()
                 .skip(line_number)
-                .take(range.end);
+                .take(range.end.saturating_sub(line_number));
             for (i, line) in lines {
                 if i % STEP == 0 {
                     let state = (parse_state.clone(), highlight_state.clone());
@@ -82,17 +83,11 @@ impl CachedHighlighter {
                 let ranges: Vec<(Style, &str)> =
                     HighlightIterator::new(&mut highlight_state, &changes, &s, &highlighter)
                         .collect();
-                if i >= self.highlighted_lines.len() {
-                    let highlighted_line = as_24_bit_terminal_escaped(&ranges[..], true);
-                    let len = line.len_chars();
-                    self.highlighted_lines.push((highlighted_line, len))
-                }
+                let highlighted_line = as_24_bit_terminal_escaped(&ranges[..], true);
+                let len = line.len_chars();
+                self.highlighted_lines.push((highlighted_line, len))
             }
-            let n = self.highlighted_lines.len();
-            self.highlighted_lines
-                .get(range.start..n)
-                .unwrap_or(&Vec::default())
-                .to_vec()
+            self.highlighted_lines[range.start..].to_vec()
         }
     }
 }
