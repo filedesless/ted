@@ -103,7 +103,7 @@ impl Ted {
             for (line, len) in lines {
                 self.term.set_cursor(0, current_line as u16)?;
                 let trimmed = line.trim();
-                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(len)));
+                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(len) + 1));
                 current_line += 1;
             }
 
