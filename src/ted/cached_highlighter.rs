@@ -53,7 +53,7 @@ impl CachedHighlighter {
         self.cache.retain(|k, _| k < &line_number);
     }
 
-    /// returns [(escaped_line, original_len)]
+    /// returns up to range.len() lines of [(escaped_line, original_len)]
     pub fn get_highlighted_lines(
         &mut self,
         content: Rope,
@@ -88,8 +88,9 @@ impl CachedHighlighter {
                     self.highlighted_lines.push((highlighted_line, len))
                 }
             }
+            let n = self.highlighted_lines.len();
             self.highlighted_lines
-                .get(range)
+                .get(range.start..n)
                 .unwrap_or(&Vec::default())
                 .to_vec()
         }
