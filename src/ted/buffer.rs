@@ -1,4 +1,5 @@
 use super::Commands;
+use crate::ted::cached_highlighter::CachedHighlighter;
 use crate::ted::format_space_chain;
 use ropey::iter::Chars;
 use ropey::Rope;
@@ -9,12 +10,10 @@ use std::ops::Range;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::SystemTime;
-use syntect::easy::HighlightLines;
 use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
-use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
 const DEFAULT_THEME: &str = "base16-eighties.dark";
 
@@ -30,9 +29,9 @@ pub struct Buffer {
     selection: Option<usize>,
     syntax_set: Rc<SyntaxSet>,
     theme_set: Rc<ThemeSet>,
-    highlighted_lines: Option<Vec<(String, usize)>>,
-    syntax: Option<SyntaxReference>,
+    syntax: SyntaxReference,
     theme: Theme,
+    cached_highlighter: CachedHighlighter,
 }
 
 pub struct BackendFile {
@@ -77,6 +76,8 @@ impl Buffer {
         syntax_set: Rc<SyntaxSet>,
         theme_set: Rc<ThemeSet>,
     ) -> Self {
+        let theme = theme_set.themes[DEFAULT_THEME].clone();
+        let syntax = syntax_set.find_syntax_plain_text();
         Self {
             mode: InputMode::Normal,
             edit_mode: EditMode::Char,
@@ -87,11 +88,11 @@ impl Buffer {
             selection: None,
             dirty: true,
             window: 0..1,
-            syntax_set,
+            syntax_set: syntax_set.clone(),
             theme_set: theme_set.clone(),
-            highlighted_lines: None,
-            syntax: None,
-            theme: theme_set.themes[DEFAULT_THEME].clone(),
+            syntax: syntax.clone(),
+            theme: theme.clone(),
+            cached_highlighter: CachedHighlighter::new(syntax.clone(), syntax_set, theme),
         }
     }
 
@@ -135,11 +136,29 @@ impl Buffer {
         } else {
             (String::default(), epoch)
         };
-        let mut buffer = Buffer::new(content, name, syntax_set, theme_set);
+        let mut buffer = Buffer::new(content, name, syntax_set.clone(), theme_set);
         buffer.file = Some(BackendFile {
             path: path.to_string(),
             modified,
         });
+        let from_ext = buffer
+            .file
+            .as_ref()
+            .and_then(|file| Path::new(&file.path).extension())
+            .and_then(|e| e.to_str())
+            .and_then(|extension| syntax_set.find_syntax_by_extension(extension));
+        let from_line = buffer
+            .content
+            .get_line(0)
+            .and_then(|line| syntax_set.find_syntax_by_first_line(&line.to_string()));
+        if let Some(syntax) = from_line.or(from_ext) {
+            buffer.syntax = syntax.clone();
+            buffer.cached_highlighter = CachedHighlighter::new(
+                syntax.clone(),
+                buffer.syntax_set.clone(),
+                buffer.theme.clone(),
+            );
+        }
         Ok(buffer)
     }
 
@@ -178,27 +197,17 @@ impl Buffer {
     }
 
     pub fn get_syntax(&self) -> &SyntaxReference {
-        let from_ext = self
-            .file
-            .as_ref()
-            .and_then(|file| Path::new(&file.path).extension())
-            .and_then(|e| e.to_str())
-            .and_then(|extension| self.syntax_set.find_syntax_by_extension(extension));
-        let from_line = self
-            .content
-            .get_line(0)
-            .and_then(|line| self.syntax_set.find_syntax_by_first_line(&line.to_string()));
-        self.syntax
-            .as_ref()
-            .or(from_ext)
-            .or(from_line)
-            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
+        &self.syntax
     }
 
     pub fn set_language(&mut self, language: &str) -> bool {
         if let Some(syntax) = self.syntax_set.find_syntax_by_name(language) {
-            self.syntax = Some(syntax.clone());
-            self.highlighted_lines = None;
+            self.syntax = syntax.clone();
+            self.cached_highlighter = CachedHighlighter::new(
+                self.syntax.clone(),
+                self.syntax_set.clone(),
+                self.theme.clone(),
+            );
             self.dirty = true;
             return true;
         }
@@ -216,28 +225,21 @@ impl Buffer {
     pub fn set_theme(&mut self, name: &str) -> bool {
         if let Some(theme) = self.theme_set.themes.get(name) {
             self.theme = theme.clone();
-            self.highlighted_lines = None;
+            self.cached_highlighter = CachedHighlighter::new(
+                self.syntax.clone(),
+                self.syntax_set.clone(),
+                self.theme.clone(),
+            );
             self.dirty = true;
             return true;
         }
         false
     }
 
+    /// returns highlighted lines within the view range
     pub fn get_highlighted_lines(&mut self) -> Vec<(String, usize)> {
-        if self.highlighted_lines.is_none() {
-            let syntax = self.get_syntax();
-
-            let mut highlighter = HighlightLines::new(syntax, &self.theme);
-            let highlighted_lines = LinesWithEndings::from(&String::from(self.content.clone()))
-                .map(|line| {
-                    let s = &line.to_string();
-                    let ranges = highlighter.highlight(s, &self.syntax_set);
-                    (as_24_bit_terminal_escaped(&ranges[..], true), line.len())
-                })
-                .collect();
-            self.highlighted_lines = Some(highlighted_lines);
-        }
-        self.highlighted_lines.as_ref().unwrap().clone()
+        self.cached_highlighter
+            .get_highlighted_lines(self.content.clone(), self.window.clone())
     }
 
     pub fn resize_window(&mut self, height: usize) {
@@ -293,7 +295,9 @@ impl Buffer {
     pub fn insert_char(&mut self, c: char) {
         self.content.insert_char(self.cursor, c);
         self.dirty = true;
-        self.highlighted_lines = None;
+        let line_number = self.content.char_to_line(self.cursor);
+        self.cached_highlighter.invalidate_from(line_number);
+        // TODO: refac to use self.move_cursor without breaking minibuffer
         self.cursor += 1;
     }
 
@@ -430,14 +434,16 @@ impl Buffer {
         self.content.remove(start..end);
         self.move_cursor(start);
         self.dirty = true;
-        self.highlighted_lines = None;
+        self.cached_highlighter.invalidate_from(current_line_number);
     }
 
     pub fn delete_chars(&mut self, n: usize) {
         let end = self.content.len_chars().min(self.cursor + n);
         self.content.remove(self.cursor..end);
         self.dirty = true;
-        self.highlighted_lines = None;
+        // self.highlighted_lines = None;
+        let line_number = self.content.char_to_line(self.cursor);
+        self.cached_highlighter.invalidate_from(line_number);
     }
 
     pub fn back_delete_char(&mut self) {
@@ -460,7 +466,8 @@ impl Buffer {
             self.content.insert(self.cursor, text);
         }
         self.dirty = true;
-        self.highlighted_lines = None;
+        let line_number = self.content.char_to_line(self.cursor);
+        self.cached_highlighter.invalidate_from(line_number);
     }
 }
 

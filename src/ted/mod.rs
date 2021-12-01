@@ -18,6 +18,7 @@ use tui::Terminal;
 
 mod buffer;
 mod buffers;
+mod cached_highlighter;
 mod command;
 
 type TTerm = Terminal<CrosstermBackend<io::Stdout>>;
@@ -95,16 +96,14 @@ impl Ted {
         let (cursor, line_number, column_number) = buffer.get_cursor();
 
         // Redraw buffer
-        // TODO use tui::buffer::Buffer instead of printing to stdout
         if buffer.dirty {
             self.term.hide_cursor()?;
             let mut current_line = 0;
             let lines = buffer.get_highlighted_lines();
-            let window = buffer.get_window();
-            for (line, len) in lines.iter().skip(window.start).take(window.len()) {
+            for (line, len) in lines {
                 self.term.set_cursor(0, current_line as u16)?;
                 let trimmed = line.trim();
-                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(*len)));
+                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(len)));
                 current_line += 1;
             }
 
@@ -127,7 +126,7 @@ impl Ted {
         };
         let window = buffer.get_window();
         let line = format!(
-            "{} - {} - ({}x{}) at {} ({}:{}), from {} to {} ({} - {})",
+            "{} - {} - ({}x{}) at {} ({}:{}), lines [{} to {}) ({} - {})",
             buffer.name,
             status,
             width,
