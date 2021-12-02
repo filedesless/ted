@@ -405,7 +405,8 @@ impl Buffer {
     fn end_of_line(&self, line_number: usize) -> usize {
         if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
-            beginning_of_line + line.len().saturating_sub(2)
+            let trimmed = line.trim();
+            beginning_of_line + trimmed.len().saturating_sub(1)
         } else {
             self.content.len_chars().saturating_sub(2)
         }
@@ -519,14 +520,14 @@ mod tests {
             ss.clone(),
             ts.clone(),
         );
-        assert_eq!(buffer.end_of_line(0), 1);
+        assert_eq!(buffer.end_of_line(0), 0);
         let buffer = Buffer::new(
             String::from("a\nbb\n"),
             String::from(""),
             ss.clone(),
             ts.clone(),
         );
-        assert_eq!(buffer.end_of_line(1), 4);
+        assert_eq!(buffer.end_of_line(1), 3);
         let buffer = Buffer::new(
             String::from("a\nbb"),
             String::from(""),
@@ -541,14 +542,14 @@ mod tests {
             ss.clone(),
             ts.clone(),
         );
-        assert_eq!(buffer.end_of_line(2), 4);
+        assert_eq!(buffer.end_of_line(2), 3);
         let buffer = Buffer::new(
             String::from("a\nbb\n"),
             String::from(""),
             ss.clone(),
             ts.clone(),
         );
-        assert_eq!(buffer.end_of_line(3), 4);
+        assert_eq!(buffer.end_of_line(3), 3);
     }
 
     #[test]
