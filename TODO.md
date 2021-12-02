@@ -6,7 +6,10 @@
 - [ ] line wrapping
 - [ ] line numbering
 - [ ] highlight current line
-  - [ ] gotta rework buffer redraw
+  - [x] gotta rework buffer redraw
+  - [ ] cache only annotated text rather than the escaped lines
+    * to draw using TUI color
+    * ideally also avoid allocating a bunch of `String`s in the cache
 - [ ] make highlighting async
   - [x] don't have to re-highlight everything on every change to the buffer  (https://github.com/trishume/syntect#caching)
 - [-] visual mode
