@@ -14,6 +14,9 @@ use syntect::highlighting::Theme;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
+use tui::layout::Rect;
+use tui::style::Style;
+use tui::widgets::StatefulWidget;
 
 const DEFAULT_THEME: &str = "base16-eighties.dark";
 
@@ -21,7 +24,6 @@ pub struct Buffer {
     pub name: String,
     pub mode: InputMode,
     pub edit_mode: EditMode,
-    pub dirty: bool,
     window: Range<usize>,
     file: Option<BackendFile>,
     content: Rope,
@@ -32,6 +34,46 @@ pub struct Buffer {
     syntax: SyntaxReference,
     theme: Theme,
     cached_highlighter: CachedHighlighter,
+}
+
+pub struct BufferWidget {}
+
+impl StatefulWidget for BufferWidget {
+    type State = Buffer;
+    fn render(self, area: Rect, buf: &mut tui::buffer::Buffer, state: &mut Self::State) {
+        let (cursor, line_number, column_number) = state.get_cursor();
+        let status_line_number = area.height.saturating_sub(1);
+
+        // draw lines from buffer
+        for y in 0..status_line_number {
+            if let Some(line) = state.get_line(state.window.start + y as usize) {
+                buf.set_string(0, y, line, Style::default());
+            }
+        }
+        // draw status line
+        let status = match (state.mode, state.edit_mode) {
+            (InputMode::Normal, EditMode::Char) => "NORMAL CHAR MODE",
+            (InputMode::Normal, EditMode::Line) => "NORMAL LINE MODE",
+            (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
+            (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
+        };
+        let window = state.get_window();
+        let line = format!(
+            "{} - {} - ({}x{}) at {} ({}:{}), lines [{} to {}) ({} - {})",
+            state.name,
+            status,
+            area.width,
+            area.height,
+            cursor,
+            line_number,
+            column_number,
+            window.start,
+            window.end,
+            state.get_syntax().name,
+            state.get_theme(),
+        );
+        buf.set_string(0, status_line_number, line, Style::default());
+    }
 }
 
 pub struct BackendFile {
@@ -86,7 +128,6 @@ impl Buffer {
             name,
             file: None,
             selection: None,
-            dirty: true,
             window: 0..1,
             syntax_set: syntax_set.clone(),
             theme_set: theme_set.clone(),
@@ -208,7 +249,6 @@ impl Buffer {
                 self.syntax_set.clone(),
                 self.theme.clone(),
             );
-            self.dirty = true;
             return true;
         }
         false
@@ -230,7 +270,6 @@ impl Buffer {
                 self.syntax_set.clone(),
                 self.theme.clone(),
             );
-            self.dirty = true;
             return true;
         }
         false
@@ -294,7 +333,6 @@ impl Buffer {
 
     pub fn insert_char(&mut self, c: char) {
         self.content.insert_char(self.cursor, c);
-        self.dirty = true;
         let line_number = self.content.char_to_line(self.cursor);
         self.cached_highlighter.invalidate_from(line_number);
         // TODO: refac to use self.move_cursor without breaking minibuffer
@@ -313,12 +351,10 @@ impl Buffer {
 
     pub fn mark_selection(&mut self) {
         self.selection = Some(self.cursor);
-        self.dirty = true;
     }
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
-        self.dirty = true;
     }
 
     pub fn get_selection_range(&self) -> Option<Range<usize>> {
@@ -392,19 +428,14 @@ impl Buffer {
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
-        if self.selection.is_some() {
-            self.dirty = true;
-        }
         let dest_line_number = self.content.char_to_line(cursor);
         if dest_line_number < self.window.start {
             let offset = self.window.start - dest_line_number; // at least 1
             self.window = self.window.start - offset..self.window.end - offset;
-            self.dirty = true;
         }
         if dest_line_number >= self.window.end {
             let offset = dest_line_number - self.window.end + 1; // at least 1
             self.window = (self.window.start + offset)..(self.window.end + offset);
-            self.dirty = true;
         }
         self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
     }
@@ -433,15 +464,12 @@ impl Buffer {
         let end = self.content.line_to_char(end_line_number);
         self.content.remove(start..end);
         self.move_cursor(start);
-        self.dirty = true;
         self.cached_highlighter.invalidate_from(current_line_number);
     }
 
     pub fn delete_chars(&mut self, n: usize) {
         let end = self.content.len_chars().min(self.cursor + n);
         self.content.remove(self.cursor..end);
-        self.dirty = true;
-        // self.highlighted_lines = None;
         let line_number = self.content.char_to_line(self.cursor);
         self.cached_highlighter.invalidate_from(line_number);
     }
@@ -454,7 +482,6 @@ impl Buffer {
     }
 
     pub fn cycle_submode(&mut self) {
-        self.dirty = true;
         self.edit_mode = match self.edit_mode {
             EditMode::Char => EditMode::Line,
             EditMode::Line => EditMode::Char,
@@ -465,7 +492,6 @@ impl Buffer {
         for _ in 0..n {
             self.content.insert(self.cursor, text);
         }
-        self.dirty = true;
         let line_number = self.content.char_to_line(self.cursor);
         self.cached_highlighter.invalidate_from(line_number);
     }

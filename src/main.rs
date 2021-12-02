@@ -19,9 +19,7 @@ fn run() -> Result<(), io::Error> {
     execute!(io::stdout(), EnterAlternateScreen)?;
     terminal.clear()?;
 
-    let size = terminal.size()?;
-
-    let mut ted = Ted::new(terminal, size);
+    let mut ted = Ted::new(terminal);
 
     for argument in env::args().skip(1) {
         println!("{}", argument);
@@ -37,7 +35,6 @@ fn run() -> Result<(), io::Error> {
                     break;
                 }
             }
-            Event::Resize(_, _) => ted.handle_resize()?,
             _ => {}
         }
         ted.draw()?;

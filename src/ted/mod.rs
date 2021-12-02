@@ -1,11 +1,10 @@
-use buffer::{Buffer, EditMode, InputMode};
+use buffer::{Buffer, BufferWidget, InputMode};
 use buffers::Buffers;
 use command::Commands;
 use crossterm::cursor::{CursorShape, SetCursorShape};
 use crossterm::event::KeyCode;
 use crossterm::event::{KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::style::{Color, SetForegroundColor};
 use serde_json::json;
 use serde_json::value::Value;
 use std::io;
@@ -14,6 +13,7 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 use tui::backend::CrosstermBackend;
 use tui::layout::Rect;
+use tui::widgets::Paragraph;
 use tui::Terminal;
 
 mod buffer;
@@ -43,20 +43,17 @@ pub struct Ted {
     minibuffer: Buffer,
     exit: bool,
     prompt: String,
-    termsize: Rect,
     space_chain: String,
     commands: Commands,
     prompt_callback: Option<fn(&mut Ted, String)>,
     universal_argument: Option<usize>,
     clipboard: String,
-    status_line: String,
-    echo_line: String,
     syntax_set: Rc<SyntaxSet>,
     theme_set: Rc<ThemeSet>,
 }
 
 impl Ted {
-    pub fn new(terminal: TTerm, termsize: Rect) -> Ted {
+    pub fn new(terminal: TTerm) -> Ted {
         let syntax_set = Rc::new(SyntaxSet::load_defaults_newlines());
         let theme_set = Rc::new(ThemeSet::load_defaults());
         Ted {
@@ -65,115 +62,40 @@ impl Ted {
             minibuffer: Buffer::empty(syntax_set.clone(), theme_set.clone()),
             exit: false,
             prompt: String::default(),
-            termsize,
             space_chain: String::default(),
             commands: Commands::default(),
             prompt_callback: None,
             universal_argument: None,
             clipboard: String::default(),
-            status_line: String::default(),
-            echo_line: String::from(" "),
             syntax_set,
             theme_set,
         }
     }
 
-    pub fn handle_resize(&mut self) -> TRes {
-        self.term.autoresize()?;
-        self.termsize = self.term.size()?;
-        self.buffers.focused_mut().dirty = true;
-        Ok(())
-    }
-
     /// Redraw the buffer when we process an event
     pub fn draw(&mut self) -> TRes {
-        let width = self.termsize.width as usize;
-        let height = self.termsize.height as usize;
-        let buffer = self.buffers.focused_mut();
-        let status_line_number = height.saturating_sub(2);
-        let echo_line_number = height.saturating_sub(1);
+        let size = self.term.size()?;
+        let mut buffer = self.buffers.focused_mut();
+        let status_line_number = size.height.saturating_sub(2) as usize;
         buffer.resize_window(status_line_number);
-        let (cursor, line_number, column_number) = buffer.get_cursor();
-
-        // Redraw buffer
-        if buffer.dirty {
-            self.term.hide_cursor()?;
-            let mut current_line = 0;
-            let lines = buffer.get_highlighted_lines();
-            for (line, len) in lines {
-                self.term.set_cursor(0, current_line as u16)?;
-                let trimmed = line.trim();
-                println!("{}{}", trimmed, " ".repeat(width.saturating_sub(len) + 1));
-                current_line += 1;
-            }
-
-            for i in current_line..status_line_number {
-                self.term.set_cursor(0, i as u16)?;
-                print!("{}", " ".repeat(width));
-            }
-
-            execute!(io::stdout(), SetForegroundColor(Color::Reset))?;
-
-            buffer.dirty = false;
-        }
-
-        // Prints out the status message
-        let status = match (buffer.mode, buffer.edit_mode) {
-            (InputMode::Normal, EditMode::Char) => "NORMAL CHAR MODE",
-            (InputMode::Normal, EditMode::Line) => "NORMAL LINE MODE",
-            (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
-            (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
-        };
-        let window = buffer.get_window();
-        let line = format!(
-            "{} - {} - ({}x{}) at {} ({}:{}), lines [{} to {}) ({} - {})",
-            buffer.name,
-            status,
-            width,
-            height,
-            cursor,
-            line_number,
-            column_number,
-            window.start,
-            window.end,
-            buffer.get_syntax().name,
-            buffer.get_theme(),
-        );
-        if line != self.status_line {
-            self.term.hide_cursor()?;
-            self.term.set_cursor(0, status_line_number as u16)?;
-            let fill = " ".repeat((self.termsize.width as usize).saturating_sub(line.len()));
-            print!("{}{}", line.chars().take(width).collect::<String>(), fill);
-            self.status_line = line;
-        }
-
-        // Prints out the echo area
         let line = self.minibuffer.get_current_line().unwrap_or_default();
-        if line != self.echo_line {
-            self.term.hide_cursor()?;
-            self.term.set_cursor(0, echo_line_number as u16)?;
-            if !self.prompt.is_empty() {
-                let message = format!("{}: {}", self.prompt, line);
-                let fill = " ".repeat(self.termsize.width as usize - message.len());
-                print!("{}{}", message, fill);
-                let (_, linum, col) = self.minibuffer.get_cursor();
-                self.term.set_cursor(
-                    (col + self.prompt.len() + 2) as u16,
-                    self.termsize.bottom() + linum as u16,
-                )?;
-            } else {
-                let fill = " ".repeat(self.termsize.width as usize - line.len());
-                print!("{}{}", line.chars().take(width).collect::<String>(), fill);
-                self.term
-                    .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
-            }
-            self.echo_line = line;
+        let echo_line = if self.prompt.len() > 0 {
+            format!("{}: {}", self.prompt, line)
         } else {
-            self.term
-                .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
-        }
+            line
+        };
 
-        self.term.show_cursor()
+        self.term.draw(|f| {
+            let widget = BufferWidget {};
+            let mut area = f.size();
+            area.height -= 1;
+            f.render_stateful_widget(widget, area, &mut buffer);
+            let echo = Paragraph::new(echo_line);
+            // TODO display cursor in prompt
+            f.render_widget(echo, Rect::new(0, area.height, area.width, 1));
+        })?;
+
+        Ok(())
     }
 
     fn new_buffer(&mut self, content: String) {
@@ -224,7 +146,7 @@ impl Ted {
         if self.buffers.len() > 1 {
             let _ = self.term.clear();
             self.buffers.cycle_next();
-            self.buffers.focused_mut().dirty = true;
+            // self.buffers.focused_mut().dirty = true;
             let message = format!("Switched to <{}>", self.buffers.focused().name);
             self.minibuffer.set_current_line(message);
         }
