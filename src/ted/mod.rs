@@ -79,10 +79,10 @@ impl Ted {
         let status_line_number = size.height.saturating_sub(2) as usize;
         buffer.resize_window(status_line_number);
         let line = self.minibuffer.get_current_line().unwrap_or_default();
-        let echo_line = if self.prompt.len() > 0 {
-            format!("{}: {}", self.prompt, line)
-        } else {
+        let echo_line = if self.prompt.is_empty() {
             line
+        } else {
+            format!("{}: {}", self.prompt, line)
         };
 
         self.term.draw(|f| {
