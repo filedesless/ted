@@ -369,9 +369,9 @@ impl Buffer {
     fn end_of_line(&self, line_number: usize) -> usize {
         if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
-            beginning_of_line + line.len().saturating_sub(1)
+            beginning_of_line + line.len().saturating_sub(2)
         } else {
-            self.content.len_chars().saturating_sub(1)
+            self.content.len_chars().saturating_sub(2)
         }
     }
 
