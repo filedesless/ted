@@ -4,6 +4,9 @@
 - [ ] move by word / paragraph / page
 - [ ] remember last col when being moved to left because line too short
 - [ ] line wrapping
+- [ ] line numbering
+- [ ] highlight current line
+  - [ ] gotta rework buffer redraw
 - [ ] make highlighting async
   - [x] don't have to re-highlight everything on every change to the buffer  (https://github.com/trishume/syntect#caching)
 - [-] visual mode
