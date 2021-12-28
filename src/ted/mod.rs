@@ -75,7 +75,8 @@ impl Ted {
     /// Redraw the buffer when we process an event
     pub fn draw(&mut self) -> TRes {
         let size = self.term.size()?;
-        let mut buffer = self.buffers.focused_mut();
+        let buffer = self.buffers.focused_mut();
+        let (_, line_number, column_number) = buffer.get_cursor();
         let status_line_number = size.height.saturating_sub(2) as usize;
         buffer.resize_window(status_line_number);
         let line = self.minibuffer.get_current_line().unwrap_or_default();
@@ -89,11 +90,15 @@ impl Ted {
             let widget = BufferWidget {};
             let mut area = f.size();
             area.height -= 1;
-            f.render_stateful_widget(widget, area, &mut buffer);
+            f.render_stateful_widget(widget, area, buffer);
             let echo = Paragraph::new(echo_line);
             // TODO display cursor in prompt
             f.render_widget(echo, Rect::new(0, area.height, area.width, 1));
         })?;
+
+        self.term
+            .set_cursor(column_number as u16, line_number as u16)?;
+        self.term.show_cursor()?;
 
         Ok(())
     }
