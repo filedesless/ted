@@ -8,6 +8,8 @@ use crossterm::execute;
 use serde_json::json;
 use serde_json::value::Value;
 use std::io;
+use std::io::BufReader;
+use std::io::Cursor;
 use std::rc::Rc;
 use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
@@ -55,7 +57,13 @@ pub struct Ted {
 impl Ted {
     pub fn new(terminal: TTerm) -> Ted {
         let syntax_set = Rc::new(SyntaxSet::load_defaults_newlines());
-        let theme_set = Rc::new(ThemeSet::load_defaults());
+        let mut ts = ThemeSet::load_defaults();
+        if let Ok(theme) = ThemeSet::load_from_reader(&mut BufReader::new(Cursor::new(
+            include_str!("../../assets/themes/base16-rebecca.tmTheme").as_bytes(),
+        ))) {
+            ts.themes.insert("base16-rebecca".to_string(), theme);
+        }
+        let theme_set = Rc::new(ts);
         Ted {
             term: terminal,
             buffers: Buffers::home(syntax_set.clone(), theme_set.clone()),
@@ -304,8 +312,8 @@ impl Ted {
     }
 
     fn help_theme(&mut self) {
-        let theme_set = ThemeSet::load_defaults();
-        let obj: Vec<Value> = theme_set
+        let obj: Vec<Value> = self
+            .theme_set
             .themes
             .iter()
             .map(|(name, theme)| {

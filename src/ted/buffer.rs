@@ -21,7 +21,7 @@ use tui::text::Span;
 use tui::text::Spans;
 use tui::widgets::StatefulWidget;
 
-const DEFAULT_THEME: &str = "base16-eighties.dark";
+const DEFAULT_THEME: &str = "base16-rebecca";
 
 pub struct Buffer {
     pub name: String,
@@ -67,7 +67,6 @@ impl StatefulWidget for BufferWidget {
                         .collect::<Vec<Span>>(),
                 );
                 buf.set_spans(0, y, &spans, area.width);
-                // buf.set_string(0, y, line, Style::default());
             }
         }
         // draw status line
