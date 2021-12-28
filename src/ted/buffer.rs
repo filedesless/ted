@@ -15,7 +15,10 @@ use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
 use tui::layout::Rect;
+use tui::style::Color;
 use tui::style::Style;
+use tui::text::Span;
+use tui::text::Spans;
 use tui::widgets::StatefulWidget;
 
 const DEFAULT_THEME: &str = "base16-eighties.dark";
@@ -44,10 +47,27 @@ impl StatefulWidget for BufferWidget {
         let (cursor, line_number, column_number) = state.get_cursor();
         let status_line_number = area.height.saturating_sub(1);
 
+        let lines = state.get_highlighted_lines();
+
         // draw lines from buffer
         for y in 0..status_line_number {
-            if let Some(line) = state.get_line(state.window.start + y as usize) {
-                buf.set_string(0, y, line, Style::default());
+            if let Some(line) = lines.get(y as usize) {
+                let spans = Spans::from(
+                    line.iter()
+                        .map(|(style, s)| {
+                            Span::styled(
+                                s,
+                                Style::default().fg(Color::Rgb(
+                                    style.foreground.r,
+                                    style.foreground.g,
+                                    style.foreground.b,
+                                )),
+                            )
+                        })
+                        .collect::<Vec<Span>>(),
+                );
+                buf.set_spans(0, y, &spans, area.width);
+                // buf.set_string(0, y, line, Style::default());
             }
         }
         // draw status line
@@ -57,7 +77,6 @@ impl StatefulWidget for BufferWidget {
             (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
             (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
         };
-        let window = state.get_window();
         let line = format!(
             "{} - {} - ({}x{}) at {} ({}:{}), lines [{} to {}) ({} - {})",
             state.name,
@@ -67,8 +86,8 @@ impl StatefulWidget for BufferWidget {
             cursor,
             line_number,
             column_number,
-            window.start,
-            window.end,
+            state.window.start,
+            state.window.end,
             state.get_syntax().name,
             state.get_theme(),
         );
@@ -276,7 +295,7 @@ impl Buffer {
     }
 
     /// returns highlighted lines within the view range
-    pub fn get_highlighted_lines(&mut self) -> Vec<(String, usize)> {
+    pub fn get_highlighted_lines(&mut self) -> Vec<Vec<(syntect::highlighting::Style, String)>> {
         self.cached_highlighter
             .get_highlighted_lines(self.content.clone(), self.window.clone())
     }
@@ -405,7 +424,7 @@ impl Buffer {
     fn end_of_line(&self, line_number: usize) -> usize {
         if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
-            let trimmed = line.trim();
+            let trimmed = line.trim_end();
             beginning_of_line + trimmed.len().saturating_sub(1)
         } else {
             self.content.len_chars().saturating_sub(2)

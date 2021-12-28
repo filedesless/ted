@@ -12,9 +12,10 @@ const STEP: usize = 1000;
 
 type State = (ParseState, HighlightState);
 
+type Line = Vec<(Style, String)>;
+
 pub struct CachedHighlighter {
-    /// [(escaped_line, original_len)]
-    highlighted_lines: Vec<(String, usize)>,
+    highlighted_lines: Vec<Line>,
     syntax: SyntaxReference,
     syntax_set: Rc<SyntaxSet>,
     theme: Theme,
@@ -53,12 +54,8 @@ impl CachedHighlighter {
         self.cache.retain(|k, _| k < &line_number);
     }
 
-    /// returns up to range.len() lines of [(escaped_line, original_len)]
-    pub fn get_highlighted_lines(
-        &mut self,
-        content: Rope,
-        range: Range<usize>,
-    ) -> Vec<(String, usize)> {
+    /// returns up to range.len() lines
+    pub fn get_highlighted_lines(&mut self, content: Rope, range: Range<usize>) -> Vec<Line> {
         if let Some(highlighted_lines) = self.highlighted_lines.get(range.clone()) {
             highlighted_lines.to_vec()
         } else {
@@ -67,7 +64,7 @@ impl CachedHighlighter {
             self.highlighted_lines.truncate(line_number);
             let highlighter = Highlighter::new(&self.theme);
 
-            // work on self.content
+            // work on content
             let lines = content
                 .lines()
                 .enumerate()
@@ -80,12 +77,11 @@ impl CachedHighlighter {
                 }
                 let s = String::from(line);
                 let changes = parse_state.parse_line(&s, &self.syntax_set);
-                let ranges: Vec<(Style, &str)> =
+                let ranges: Vec<(Style, String)> =
                     HighlightIterator::new(&mut highlight_state, &changes, &s, &highlighter)
+                        .map(|(style, s)| (style, String::from(s)))
                         .collect();
-                let highlighted_line = as_24_bit_terminal_escaped(&ranges[..], true);
-                let len = line.len_chars();
-                self.highlighted_lines.push((highlighted_line, len))
+                self.highlighted_lines.push(ranges)
             }
             self.highlighted_lines[range.start..].to_vec()
         }

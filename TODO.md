@@ -7,7 +7,7 @@
 - [ ] line numbering
 - [ ] highlight current line
   - [x] gotta rework buffer redraw
-  - [ ] cache only annotated text rather than the escaped lines
+  - [x] cache only annotated text rather than the escaped lines
     * to draw using TUI color
     * ideally also avoid allocating a bunch of `String`s in the cache
 - [ ] make highlighting async

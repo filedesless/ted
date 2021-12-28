@@ -96,8 +96,9 @@ impl Ted {
             f.render_widget(echo, Rect::new(0, area.height, area.width, 1));
         })?;
 
+        let window = buffer.get_window();
         self.term
-            .set_cursor(column_number as u16, line_number as u16)?;
+            .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
         self.term.show_cursor()?;
 
         Ok(())
