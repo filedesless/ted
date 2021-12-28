@@ -2,7 +2,6 @@ use ropey::Rope;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::rc::Rc;
-use syntect::util::as_24_bit_terminal_escaped;
 use syntect::{highlighting::*, parsing::*};
 
 #[cfg(debug_assertions)]
@@ -36,16 +35,17 @@ impl CachedHighlighter {
 
     /// returns (line_number, state)
     fn latest_state(&mut self) -> (usize, State) {
-        if let Some(k) = self.cache.keys().max() {
-            let key = k.clone();
-            if let Some(state) = self.cache.get_mut(&key) {
-                return (key, state.clone());
+        if let Some(&k) = self.cache.keys().max() {
+            if let Some(state) = self.cache.get_mut(&k) {
+                return (k, state.clone());
             }
         }
-        let mut highlighter = Highlighter::new(&self.theme);
+        let highlighter = Highlighter::new(&self.theme);
         let parse_state = ParseState::new(&self.syntax);
-        let highlight_state = HighlightState::new(&mut highlighter, ScopeStack::new());
-        (0, (parse_state, highlight_state))
+        let highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
+        let state = (parse_state, highlight_state);
+        self.cache.insert(0, state.clone());
+        (0, state)
     }
 
     /// must be called when content changes
