@@ -108,9 +108,8 @@ impl Ted {
             f.render_stateful_widget(widget, area, buffer);
             let echo = Paragraph::new(echo_line);
             f.render_widget(echo, Rect::new(0, area.height, area.width, 1));
+            f.set_cursor(cursor_x, cursor_y);
         })?;
-        self.term.set_cursor(cursor_x, cursor_y)?;
-        self.term.show_cursor()?;
 
         Ok(())
     }
