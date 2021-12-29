@@ -30,6 +30,7 @@ pub struct Buffer {
     file: Option<BackendFile>,
     content: Rope,
     cursor: usize, // 0..content.len_chars()
+    last_col: usize,
     selection: Option<usize>,
     syntax_set: Rc<SyntaxSet>,
     theme_set: Rc<ThemeSet>,
@@ -155,6 +156,7 @@ impl Buffer {
             edit_mode: EditMode::Char,
             content: Rope::from(content),
             cursor: 0,
+            last_col: 0,
             name,
             file: None,
             selection: None,
@@ -395,31 +397,42 @@ impl Buffer {
 
     pub fn move_cursor_bol(&mut self) {
         let current_line = self.content.char_to_line(self.cursor);
-        self.move_cursor(self.content.line_to_char(current_line));
+        let dest_cursor = self.content.line_to_char(current_line);
+        if dest_cursor != self.cursor {
+            self.move_cursor(dest_cursor);
+            self.last_col = self.cursor - self.content.line_to_char(current_line);
+        }
     }
 
     pub fn move_cursor_eol(&mut self) {
         let current_line = self.content.char_to_line(self.cursor);
-        self.move_cursor(self.end_of_line(current_line));
+        let dest_cursor = self.end_of_line(current_line);
+        if dest_cursor != self.cursor {
+            self.move_cursor(dest_cursor);
+            self.last_col = self.cursor - self.content.line_to_char(current_line);
+        }
     }
 
     pub fn move_cursor_left(&mut self, n: usize) {
         let line_number = self.content.char_to_line(self.cursor);
-        let beginning_of_line = self.content.line_to_char(line_number);
-        if self.cursor == beginning_of_line {
-            return;
-        }
 
-        self.move_cursor(self.cursor.saturating_sub(n));
+        let dest_cursor = self
+            .content
+            .line_to_char(line_number)
+            .max(self.cursor.saturating_sub(n));
+        if dest_cursor != self.cursor {
+            self.move_cursor(dest_cursor);
+            self.last_col = self.cursor - self.content.line_to_char(line_number);
+        }
     }
 
     pub fn move_cursor_right(&mut self, n: usize) {
-        let end_of_line = self.end_of_line(self.content.char_to_line(self.cursor));
-        if self.cursor == end_of_line {
-            return;
+        let line_number = self.content.char_to_line(self.cursor);
+        let dest_cursor = self.end_of_line(line_number).min(self.cursor + n);
+        if dest_cursor != self.cursor {
+            self.move_cursor(dest_cursor);
+            self.last_col = self.cursor - self.content.line_to_char(line_number);
         }
-
-        self.move_cursor(self.cursor + n);
     }
 
     /// will return last char position if line_number >= self.content.len_lines()
@@ -437,7 +450,8 @@ impl Buffer {
         let current_line_number = self.content.char_to_line(self.cursor);
         let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
         let dest_line_number = current_line_number.saturating_sub(n);
-        let dest_cursor = self.content.line_to_char(dest_line_number) + current_line_offset;
+        let dest_cursor =
+            self.content.line_to_char(dest_line_number) + current_line_offset.max(self.last_col);
         self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
     }
 
@@ -451,10 +465,10 @@ impl Buffer {
             .min(current_line_number + n);
         // find the furthest line that's non-empty
         for line_number in (current_line_number..=dest_line_number).rev() {
-            if let Some(line) = self.get_line(line_number) {
-                let dest_cursor = self.content.line_to_char(line_number)
-                    + current_line_offset.min(line.len().saturating_sub(1));
-                self.move_cursor(dest_cursor);
+            if self.get_line(line_number).is_some() {
+                let dest_cursor =
+                    self.content.line_to_char(line_number) + current_line_offset.max(self.last_col);
+                self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
                 return;
             }
         }
