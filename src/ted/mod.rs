@@ -59,9 +59,9 @@ impl Ted {
         let syntax_set = Rc::new(SyntaxSet::load_defaults_newlines());
         let mut ts = ThemeSet::load_defaults();
         if let Ok(theme) = ThemeSet::load_from_reader(&mut BufReader::new(Cursor::new(
-            include_str!("../../assets/themes/base16-rebecca.tmTheme").as_bytes(),
+            include_str!("../../assets/themes/ted.tmTheme").as_bytes(),
         ))) {
-            ts.themes.insert("base16-rebecca".to_string(), theme);
+            ts.themes.insert("ted".to_string(), theme);
         }
         let theme_set = Rc::new(ts);
         Ted {

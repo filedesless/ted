@@ -20,7 +20,7 @@ use tui::text::Span;
 use tui::text::Spans;
 use tui::widgets::StatefulWidget;
 
-const DEFAULT_THEME: &str = "base16-rebecca";
+const DEFAULT_THEME: &str = "ted";
 
 pub struct Buffer {
     pub name: String,
