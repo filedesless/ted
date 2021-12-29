@@ -2,7 +2,7 @@
 
 Ted is a Text Editor.
 
-![ted](https://i.imgur.com/tgKlqQp.png)
+![ted](https://imgur.com/je1euA4.png)
 
 ## Build
 
