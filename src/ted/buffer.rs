@@ -444,9 +444,20 @@ impl Buffer {
     pub fn move_cursor_down(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
-        let dest_line_number = self.content.len_lines().min(current_line_number + n);
-        let dest_cursor = self.content.line_to_char(dest_line_number) + current_line_offset;
-        self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
+        let dest_line_number = self
+            .content
+            .len_lines()
+            .saturating_sub(1)
+            .min(current_line_number + n);
+        // find the furthest line that's non-empty
+        for line_number in (current_line_number..=dest_line_number).rev() {
+            if let Some(line) = self.get_line(line_number) {
+                let dest_cursor = self.content.line_to_char(line_number)
+                    + current_line_offset.min(line.len().saturating_sub(1));
+                self.move_cursor(dest_cursor);
+                return;
+            }
+        }
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
