@@ -1,7 +1,6 @@
 use super::Commands;
 use crate::ted::cached_highlighter::CachedHighlighter;
 use crate::ted::format_space_chain;
-use ropey::iter::Chars;
 use ropey::Rope;
 use std::fs::File;
 use std::io;
@@ -155,7 +154,7 @@ impl Buffer {
             selection: None,
             window: 0..1,
             syntax_set: syntax_set.clone(),
-            theme_set: theme_set.clone(),
+            theme_set,
             syntax: syntax.clone(),
             theme: theme.clone(),
             cached_highlighter: CachedHighlighter::new(syntax.clone(), syntax_set, theme),
@@ -311,15 +310,6 @@ impl Buffer {
         if self.content.char_to_line(self.cursor) >= self.window.end {
             self.cursor = self.end_of_line(self.window.end);
         }
-    }
-
-    /// returns chars from the buffer and the offset of the first
-    pub fn get_chars(&self) -> Option<(Chars, usize)> {
-        if self.window.start <= self.content.len_lines() {
-            let bol = self.content.line_to_char(self.window.start);
-            return Some((self.content.chars_at(bol), bol));
-        }
-        None
     }
 
     pub fn get_current_line(&self) -> Option<String> {

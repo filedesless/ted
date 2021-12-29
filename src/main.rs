@@ -29,13 +29,10 @@ fn run() -> Result<(), io::Error> {
 
     // TODO: loop with event polling
     loop {
-        match read()? {
-            Event::Key(k) => {
-                if ted.handle_key(k) {
-                    break;
-                }
+        if let Event::Key(k) = read()? {
+            if ted.handle_key(k) {
+                break;
             }
-            _ => {}
         }
         ted.draw()?;
     }
