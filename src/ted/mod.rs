@@ -88,10 +88,17 @@ impl Ted {
         let status_line_number = size.height.saturating_sub(2) as usize;
         buffer.resize_window(status_line_number);
         let line = self.minibuffer.get_current_line().unwrap_or_default();
-        let echo_line = if self.prompt.is_empty() {
-            line
+        let window = buffer.get_window();
+        let (echo_line, cursor_x, cursor_y) = if self.prompt.is_empty() {
+            (
+                line,
+                column_number as u16,
+                (line_number - window.start) as u16,
+            )
         } else {
-            format!("{}: {}", self.prompt, line)
+            let line = format!("{}: {}", self.prompt, line);
+            let n = line.len();
+            (line, n as u16, size.height.saturating_sub(1))
         };
 
         self.term.draw(|f| {
@@ -100,13 +107,9 @@ impl Ted {
             area.height -= 1;
             f.render_stateful_widget(widget, area, buffer);
             let echo = Paragraph::new(echo_line);
-            // TODO display cursor in prompt
             f.render_widget(echo, Rect::new(0, area.height, area.width, 1));
         })?;
-
-        let window = buffer.get_window();
-        self.term
-            .set_cursor(column_number as u16, (line_number - window.start) as u16)?;
+        self.term.set_cursor(cursor_x, cursor_y)?;
         self.term.show_cursor()?;
 
         Ok(())
