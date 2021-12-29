@@ -5,7 +5,8 @@
 - [ ] remember last col when being moved to left because line too short
 - [ ] line wrapping
 - [ ] line numbering
-- [ ] highlight current line
+- [ ] rework event loop to be non-blocking
+- [x] highlight current line
   - [x] gotta rework buffer redraw
   - [x] cache only annotated text rather than the escaped lines
     * to draw using TUI color

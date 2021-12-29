@@ -48,10 +48,17 @@ impl StatefulWidget for BufferWidget {
         let status_line_number = area.height.saturating_sub(1);
 
         let lines = state.get_highlighted_lines();
-
         // draw lines from buffer
         for y in 0..status_line_number {
             if let Some(line) = lines.get(y as usize) {
+                if y == (line_number - state.window.start) as u16 {
+                    if let Some(color) = state.theme.settings.line_highlight {
+                        buf.set_style(
+                            Rect::new(0, y, area.width, 1),
+                            Style::default().bg(Color::Rgb(color.r, color.g, color.b)),
+                        )
+                    }
+                }
                 let spans = Spans::from(
                     line.iter()
                         .map(|(style, s)| {
