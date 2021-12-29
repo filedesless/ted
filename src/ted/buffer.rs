@@ -62,7 +62,7 @@ impl StatefulWidget for BufferWidget {
                     line.iter()
                         .map(|(style, s)| {
                             Span::styled(
-                                s,
+                                s.replace("\n", "¶"),
                                 Style::default().fg(Color::Rgb(
                                     style.foreground.r,
                                     style.foreground.g,
@@ -73,6 +73,8 @@ impl StatefulWidget for BufferWidget {
                         .collect::<Vec<Span>>(),
                 );
                 buf.set_spans(0, y, &spans, area.width);
+            } else {
+                buf.set_string(0, y, "~", Style::default());
             }
         }
         // draw status line

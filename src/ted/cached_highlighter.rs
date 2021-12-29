@@ -69,7 +69,8 @@ impl CachedHighlighter {
                 .lines()
                 .enumerate()
                 .skip(line_number)
-                .take(range.end.saturating_sub(line_number));
+                .take(range.end.saturating_sub(line_number))
+                .filter(|(_, s)| s.len_chars() != 0);
             for (i, line) in lines {
                 if i % STEP == 0 {
                     let state = (parse_state.clone(), highlight_state.clone());
