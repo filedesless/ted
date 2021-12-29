@@ -142,7 +142,11 @@ impl Buffer {
         syntax_set: Rc<SyntaxSet>,
         theme_set: Rc<ThemeSet>,
     ) -> Self {
-        let theme = theme_set.themes[DEFAULT_THEME].clone();
+        let theme = theme_set
+            .themes
+            .get(DEFAULT_THEME)
+            .cloned()
+            .unwrap_or_default();
         let syntax = syntax_set.find_syntax_plain_text();
         Self {
             mode: InputMode::Normal,
