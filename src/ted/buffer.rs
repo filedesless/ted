@@ -1,6 +1,7 @@
 use super::Commands;
 use crate::ted::cached_highlighter::CachedHighlighter;
 use crate::ted::format_space_chain;
+use crate::ted::Config;
 use ropey::Rope;
 use std::fs::File;
 use std::io;
@@ -10,9 +11,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::SystemTime;
 use syntect::highlighting::Theme;
-use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxReference;
-use syntect::parsing::SyntaxSet;
 use tui::layout::Rect;
 use tui::style::Color;
 use tui::style::Style;
@@ -31,10 +30,9 @@ pub struct Buffer {
     cursor: usize, // 0..content.len_chars()
     last_col: usize,
     selection: Option<usize>,
-    syntax_set: Rc<SyntaxSet>,
-    theme_set: Rc<ThemeSet>,
     syntax: SyntaxReference,
     theme: Theme,
+    config: Rc<Config>,
     cached_highlighter: CachedHighlighter,
 }
 
@@ -62,7 +60,11 @@ impl StatefulWidget for BufferWidget {
                     line.iter()
                         .map(|(style, s)| {
                             Span::styled(
-                                s.replace("\n", "¶"),
+                                if state.config.show_whitespace {
+                                    s.replace("\n", "¶")
+                                } else {
+                                    s.to_string()
+                                },
                                 Style::default().fg(Color::Rgb(
                                     style.foreground.r,
                                     style.foreground.g,
@@ -73,7 +75,7 @@ impl StatefulWidget for BufferWidget {
                         .collect::<Vec<Span>>(),
                 );
                 buf.set_spans(0, y, &spans, area.width);
-            } else {
+            } else if state.config.show_whitespace {
                 buf.set_string(0, y, "~", Style::default());
             }
         }
@@ -144,37 +146,36 @@ Enter chains starting with `SPC` to run the following commands
 
 impl Buffer {
     /// Basic in-memory buffer
-    pub fn new(
-        content: String,
-        name: String,
-        syntax_set: Rc<SyntaxSet>,
-        theme_set: Rc<ThemeSet>,
-    ) -> Self {
-        let theme = theme_set
+    pub fn new(content: String, name: String, config: Rc<Config>) -> Self {
+        let theme = config
+            .theme_set
             .themes
             .get(DEFAULT_THEME)
             .cloned()
             .unwrap_or_default();
-        let syntax = syntax_set.find_syntax_plain_text();
+        let syntax = config.syntax_set.find_syntax_plain_text().clone();
         Self {
             mode: InputMode::Normal,
             content: Rope::from(content),
+            cached_highlighter: CachedHighlighter::new(
+                syntax.clone(),
+                theme.clone(),
+                config.clone(),
+            ),
+            config,
             cursor: 0,
             last_col: 0,
             name,
             file: None,
             selection: None,
             window: 0..1,
-            syntax_set: syntax_set.clone(),
-            theme_set,
-            syntax: syntax.clone(),
-            theme: theme.clone(),
-            cached_highlighter: CachedHighlighter::new(syntax.clone(), syntax_set, theme),
+            syntax,
+            theme,
         }
     }
 
     /// Home buffer with help
-    pub fn home(syntax_set: Rc<SyntaxSet>, theme_set: Rc<ThemeSet>) -> Self {
+    pub fn home(config: Rc<Config>) -> Self {
         let mut message = String::from(HELP);
         for command in Commands::default().commands {
             let line = format!(
@@ -189,17 +190,13 @@ impl Buffer {
             );
             message.push_str(&line);
         }
-        let mut buffer = Buffer::new(message, String::from("Buffer #1"), syntax_set, theme_set);
+        let mut buffer = Buffer::new(message, String::from("Buffer #1"), config);
         buffer.set_language(&"Markdown".to_string());
         buffer
     }
 
     /// Buffer with a backend file to save to
-    pub fn from_file(
-        path: &str,
-        syntax_set: Rc<SyntaxSet>,
-        theme_set: Rc<ThemeSet>,
-    ) -> io::Result<Self> {
+    pub fn from_file(path: &str, config: Rc<Config>) -> io::Result<Self> {
         let p = Path::new(&path);
         let name = if let Some(stem) = p.file_stem() {
             stem.to_string_lossy().to_string()
@@ -213,7 +210,7 @@ impl Buffer {
         } else {
             (String::default(), epoch)
         };
-        let mut buffer = Buffer::new(content, name, syntax_set.clone(), theme_set);
+        let mut buffer = Buffer::new(content, name, config.clone());
         buffer.file = Some(BackendFile {
             path: path.to_string(),
             modified,
@@ -223,18 +220,16 @@ impl Buffer {
             .as_ref()
             .and_then(|file| Path::new(&file.path).extension())
             .and_then(|e| e.to_str())
-            .and_then(|extension| syntax_set.find_syntax_by_extension(extension));
-        let from_line = buffer
-            .content
-            .get_line(0)
-            .and_then(|line| syntax_set.find_syntax_by_first_line(&line.to_string()));
+            .and_then(|extension| config.syntax_set.find_syntax_by_extension(extension));
+        let from_line = buffer.content.get_line(0).and_then(|line| {
+            config
+                .syntax_set
+                .find_syntax_by_first_line(&line.to_string())
+        });
         if let Some(syntax) = from_line.or(from_ext) {
             buffer.syntax = syntax.clone();
-            buffer.cached_highlighter = CachedHighlighter::new(
-                syntax.clone(),
-                buffer.syntax_set.clone(),
-                buffer.theme.clone(),
-            );
+            buffer.cached_highlighter =
+                CachedHighlighter::new(syntax.clone(), buffer.theme.clone(), config);
         }
         Ok(buffer)
     }
@@ -259,10 +254,6 @@ impl Buffer {
         }
     }
 
-    pub fn empty(syntax_set: Rc<SyntaxSet>, theme_set: Rc<ThemeSet>) -> Self {
-        Buffer::new(String::default(), String::default(), syntax_set, theme_set)
-    }
-
     /// returns a non-empty line
     pub fn get_line(&self, line_number: usize) -> Option<String> {
         if let Some(line) = self.content.get_line(line_number) {
@@ -278,12 +269,12 @@ impl Buffer {
     }
 
     pub fn set_language(&mut self, language: &str) -> bool {
-        if let Some(syntax) = self.syntax_set.find_syntax_by_name(language) {
+        if let Some(syntax) = self.config.syntax_set.find_syntax_by_name(language) {
             self.syntax = syntax.clone();
             self.cached_highlighter = CachedHighlighter::new(
                 self.syntax.clone(),
-                self.syntax_set.clone(),
                 self.theme.clone(),
+                self.config.clone(),
             );
             return true;
         }
@@ -299,12 +290,12 @@ impl Buffer {
     }
 
     pub fn set_theme(&mut self, name: &str) -> bool {
-        if let Some(theme) = self.theme_set.themes.get(name) {
+        if let Some(theme) = self.config.theme_set.themes.get(name) {
             self.theme = theme.clone();
             self.cached_highlighter = CachedHighlighter::new(
                 self.syntax.clone(),
-                self.syntax_set.clone(),
                 self.theme.clone(),
+                self.config.clone(),
             );
             return true;
         }
@@ -322,22 +313,6 @@ impl Buffer {
         if self.content.char_to_line(self.cursor) >= self.window.end {
             self.cursor = self.end_of_line(self.window.end);
         }
-    }
-
-    pub fn get_current_line(&self) -> Option<String> {
-        let line_index = self.content.char_to_line(self.cursor);
-        self.get_line(line_index)
-    }
-
-    pub fn set_current_line(&mut self, line: String) {
-        let current_line_number = self.content.char_to_line(self.cursor);
-        let start = self.content.line_to_char(current_line_number);
-        let end = self.content.line_to_char(current_line_number + 1);
-        self.content.remove(start..end);
-        self.content.insert(start, &line);
-        self.cursor = self
-            .cursor
-            .min(self.content.line(current_line_number).len_chars());
     }
 
     /// returns the [first_line_number, last_line_number) within view
@@ -553,79 +528,44 @@ impl Buffer {
 
 #[cfg(test)]
 mod tests {
-    use super::Buffer;
-    use std::rc::Rc;
-    use syntect::highlighting::ThemeSet;
-    use syntect::parsing::SyntaxSet;
+    use super::*;
 
     #[test]
     fn end_of_line() {
-        let ss = Rc::new(SyntaxSet::load_defaults_newlines());
-        let ts = Rc::new(ThemeSet::load_defaults());
+        let config = Rc::new(Config::default());
         // empty line defaults to first char, even if there's none
-        let buffer = Buffer::new(String::from(""), String::from(""), ss.clone(), ts.clone());
+        let buffer = Buffer::new(String::from(""), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(0), 0);
-        let buffer = Buffer::new(String::from("\n"), String::from(""), ss.clone(), ts.clone());
+        let buffer = Buffer::new(String::from("\n"), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(0), 0);
-        let buffer = Buffer::new(
-            String::from("a\n"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\n"), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(0), 0);
-        let buffer = Buffer::new(
-            String::from("a\nbb\n"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(1), 3);
-        let buffer = Buffer::new(
-            String::from("a\nbb"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\nbb"), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(1), 3);
         // out of bound returns last pos
-        let buffer = Buffer::new(
-            String::from("a\nbb\n"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(2), 3);
-        let buffer = Buffer::new(
-            String::from("a\nbb\n"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\nbb\n"), String::from(""), config);
         assert_eq!(buffer.end_of_line(3), 3);
     }
 
     #[test]
     fn get_line() {
-        let ss = Rc::new(SyntaxSet::load_defaults_newlines());
-        let ts = Rc::new(ThemeSet::load_defaults());
+        let config = Rc::new(Config::default());
 
-        let buffer = Buffer::new(String::from(""), String::from(""), ss.clone(), ts.clone());
+        let buffer = Buffer::new(String::from(""), String::from(""), config.clone());
         assert_eq!(buffer.get_line(0).map(String::from), None);
 
-        let buffer = Buffer::new(String::from("\n"), String::from(""), ss.clone(), ts.clone());
+        let buffer = Buffer::new(String::from("\n"), String::from(""), config.clone());
         assert_eq!(
             buffer.get_line(0).map(String::from),
             Some(String::from("\n"))
         );
         assert_eq!(buffer.get_line(1).map(String::from), None);
 
-        let buffer = Buffer::new(
-            String::from("a\n\n"),
-            String::from(""),
-            ss.clone(),
-            ts.clone(),
-        );
+        let buffer = Buffer::new(String::from("a\n\n"), String::from(""), config);
         assert_eq!(
             buffer.get_line(0).map(String::from),
             Some(String::from("a\n"))
@@ -639,18 +579,16 @@ mod tests {
 
     #[test]
     fn delete_line_out_of_bounds() {
-        let ss = Rc::new(SyntaxSet::load_defaults_newlines());
-        let ts = Rc::new(ThemeSet::load_defaults());
-        let mut buffer = Buffer::new(String::from(""), String::from(""), ss.clone(), ts.clone());
+        let config = Rc::new(Config::default());
+        let mut buffer = Buffer::new(String::from(""), String::from(""), config);
         buffer.delete_lines(1000);
         assert_eq!(buffer.get_line(0), None);
     }
 
     #[test]
     fn delete_char_out_of_bounds() {
-        let ss = Rc::new(SyntaxSet::load_defaults_newlines());
-        let ts = Rc::new(ThemeSet::load_defaults());
-        let mut buffer = Buffer::new(String::from(""), String::from(""), ss.clone(), ts.clone());
+        let config = Rc::new(Config::default());
+        let mut buffer = Buffer::new(String::from(""), String::from(""), config);
         buffer.delete_chars(1000);
     }
 }

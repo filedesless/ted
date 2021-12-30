@@ -1,8 +1,7 @@
 use super::buffer::Buffer;
+use crate::ted::Config;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use syntect::highlighting::ThemeSet;
-use syntect::parsing::SyntaxSet;
 
 pub struct Buffers {
     buffers: VecDeque<Buffer>,
@@ -10,9 +9,9 @@ pub struct Buffers {
 
 impl Buffers {
     /// singleton of the home buffer
-    pub fn home(syntax_set: Rc<SyntaxSet>, theme_set: Rc<ThemeSet>) -> Self {
+    pub fn home(config: Rc<Config>) -> Self {
         Self {
-            buffers: VecDeque::from(vec![Buffer::home(syntax_set, theme_set)]),
+            buffers: VecDeque::from(vec![Buffer::home(config)]),
         }
     }
 

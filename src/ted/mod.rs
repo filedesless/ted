@@ -1,6 +1,7 @@
 use buffer::{Buffer, BufferWidget, InputMode};
 use buffers::Buffers;
 use command::Commands;
+use config::Config;
 use crossterm::cursor::{CursorShape, SetCursorShape};
 use crossterm::event::KeyCode;
 use crossterm::event::{KeyEvent, KeyModifiers};
@@ -22,6 +23,7 @@ mod buffer;
 mod buffers;
 mod cached_highlighter;
 mod command;
+mod config;
 
 type TTerm = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -51,23 +53,15 @@ pub struct Ted {
     prompt_callback: Option<fn(&mut Ted, String)>,
     universal_argument: Option<usize>,
     clipboard: String,
-    syntax_set: Rc<SyntaxSet>,
-    theme_set: Rc<ThemeSet>,
+    config: Rc<Config>,
 }
 
 impl Ted {
-    pub fn new(terminal: TTerm) -> Ted {
-        let syntax_set = Rc::new(SyntaxSet::load_defaults_newlines());
-        let mut ts = ThemeSet::load_defaults();
-        if let Ok(theme) = ThemeSet::load_from_reader(&mut BufReader::new(Cursor::new(
-            include_str!("../../assets/themes/ted.tmTheme").as_bytes(),
-        ))) {
-            ts.themes.insert("ted".to_string(), theme);
-        }
-        let theme_set = Rc::new(ts);
+    pub fn new(term: TTerm) -> Ted {
+        let config = Rc::new(Config::default());
         Ted {
-            term: terminal,
-            buffers: Buffers::home(syntax_set.clone(), theme_set.clone()),
+            term,
+            buffers: Buffers::home(config.clone()),
             exit: false,
             prompt: String::default(),
             answer: String::default(),
@@ -77,8 +71,7 @@ impl Ted {
             prompt_callback: None,
             universal_argument: None,
             clipboard: String::default(),
-            syntax_set,
-            theme_set,
+            config,
         }
     }
 
@@ -116,15 +109,10 @@ impl Ted {
     }
 
     fn new_buffer(&mut self, content: String) {
-        let _ = self.term.clear();
         let name = format!("Buffer #{}", self.buffers.len() + 1);
         self.message = format!("Created new buffer <{}>", name);
-        self.buffers.new_buffer(Buffer::new(
-            content,
-            name,
-            self.syntax_set.clone(),
-            self.theme_set.clone(),
-        ));
+        self.buffers
+            .new_buffer(Buffer::new(content, name, self.config.clone()));
     }
 
     fn run_command(&mut self, command: String) {
@@ -137,8 +125,7 @@ impl Ted {
     }
 
     pub fn file_open(&mut self, filepath: String) {
-        let _ = self.term.clear();
-        let buffer = Buffer::from_file(&filepath, self.syntax_set.clone(), self.theme_set.clone());
+        let buffer = Buffer::from_file(&filepath, self.config.clone());
         self.message = match buffer {
             Ok(buffer) => {
                 let message = format!("Created new buffer <{}>", buffer.name);
@@ -158,9 +145,7 @@ impl Ted {
 
     fn next_buffer(&mut self) {
         if self.buffers.len() > 1 {
-            let _ = self.term.clear();
             self.buffers.cycle_next();
-            // self.buffers.focused_mut().dirty = true;
             self.message = format!("Switched to <{}>", self.buffers.focused().name);
         }
     }
@@ -306,6 +291,7 @@ impl Ted {
 
     fn help_theme(&mut self) {
         let obj: Vec<Value> = self
+            .config
             .theme_set
             .themes
             .iter()

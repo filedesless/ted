@@ -1,3 +1,4 @@
+use crate::ted::Config;
 use ropey::Rope;
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -16,17 +17,17 @@ type Line = Vec<(Style, String)>;
 pub struct CachedHighlighter {
     highlighted_lines: Vec<Line>,
     syntax: SyntaxReference,
-    syntax_set: Rc<SyntaxSet>,
+    config: Rc<Config>,
     theme: Theme,
     /// (line_number => states) before parsing the line
     cache: BTreeMap<usize, State>,
 }
 
 impl CachedHighlighter {
-    pub fn new(syntax: SyntaxReference, syntax_set: Rc<SyntaxSet>, theme: Theme) -> Self {
+    pub fn new(syntax: SyntaxReference, theme: Theme, config: Rc<Config>) -> Self {
         CachedHighlighter {
             syntax,
-            syntax_set,
+            config,
             theme,
             highlighted_lines: Vec::default(),
             cache: BTreeMap::default(),
@@ -77,7 +78,7 @@ impl CachedHighlighter {
                     self.cache.insert(i, state);
                 }
                 let s = String::from(line);
-                let changes = parse_state.parse_line(&s, &self.syntax_set);
+                let changes = parse_state.parse_line(&s, &self.config.syntax_set);
                 let ranges: Vec<(Style, String)> =
                     HighlightIterator::new(&mut highlight_state, &changes, &s, &highlighter)
                         .map(|(style, s)| (style, String::from(s)))
