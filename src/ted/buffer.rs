@@ -25,7 +25,6 @@ const DEFAULT_THEME: &str = "ted";
 pub struct Buffer {
     pub name: String,
     pub mode: InputMode,
-    pub edit_mode: EditMode,
     window: Range<usize>,
     file: Option<BackendFile>,
     content: Rope,
@@ -79,11 +78,9 @@ impl StatefulWidget for BufferWidget {
             }
         }
         // draw status line
-        let status = match (state.mode, state.edit_mode) {
-            (InputMode::Normal, EditMode::Char) => "NORMAL CHAR MODE",
-            (InputMode::Normal, EditMode::Line) => "NORMAL LINE MODE",
-            (InputMode::Insert, EditMode::Char) => "INSERT CHAR MODE",
-            (InputMode::Insert, EditMode::Line) => "INSERT LINE MODE",
+        let status = match state.mode {
+            InputMode::Normal => "NORMAL MODE",
+            InputMode::Insert => "INSERT MODE",
         };
         let line = format!(
             "{} - {} - ({}x{}) at {} ({}:{}), lines [{} to {}) ({} - {})",
@@ -108,32 +105,40 @@ pub struct BackendFile {
     modified: SystemTime,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum InputMode {
     Normal,
     Insert,
-}
-
-#[derive(Copy, Clone)]
-pub enum EditMode {
-    Line,
-    Char,
 }
 
 const HELP: &str = r#"# Welcome to Ted
 
 ## NORMAL mode
 
-- Press SPC q to quit from NORMAL mode.
-- Use "h, j, k, l" keys to move your cursor around in normal mode.
-- Edit text by entering INSERT mode with your "i" key.
-- Press SPC to enter commands by chain.
+In this mode keystrokes have a special meaning, mostly mimicking vim.
+
+- Press `SPC q` to quit ted
+- Press `SPC` to enter commands by chain
+
+### Moving the cursor
+
+- Use `h, j, k, l` keys to move your cursor around in normal mode
+- Use `J, K` keys to move a page up or down
+- Use `H, L` keys to move beginning or end of line
+
+###  Enter INSERT mode with one of the following keys
+
+- Use `i, I` keys to insert under cursor or at beginning of line
+- Use `a, A` keys to append under cursor or at end of line
+- Use `o, O` keys to append newline under or above current line
 
 ## INSERT mode
 
-- Press ESC to go back to normal mode.
+In this mode keystrokes are inserted in the buffer, press `ESC` to go back to normal mode
 
-## Commands
+## SPACE chains
+
+Enter chains starting with `SPC` to run the following commands
 
 "#;
 
@@ -153,7 +158,6 @@ impl Buffer {
         let syntax = syntax_set.find_syntax_plain_text();
         Self {
             mode: InputMode::Normal,
-            edit_mode: EditMode::Char,
             content: Rope::from(content),
             cursor: 0,
             last_col: 0,
@@ -174,7 +178,7 @@ impl Buffer {
         let mut message = String::from(HELP);
         for command in Commands::default().commands {
             let line = format!(
-                "- {} ({}): {}\n",
+                "- {} `{}`: {}\n",
                 command.name,
                 command
                     .chain
@@ -358,8 +362,25 @@ impl Buffer {
         self.content.insert_char(self.cursor, c);
         let line_number = self.content.char_to_line(self.cursor);
         self.cached_highlighter.invalidate_from(line_number);
-        // TODO: refac to use self.move_cursor without breaking minibuffer
-        self.cursor += 1;
+        self.move_cursor(self.cursor + 1);
+    }
+
+    pub fn prepend_newline(&mut self) {
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let bol = self.content.line_to_char(current_line_number);
+        self.content.insert_char(bol, '\n');
+        self.cached_highlighter.invalidate_from(current_line_number);
+        if self.cursor != bol {
+            self.move_cursor_up(1);
+        }
+    }
+
+    pub fn append_newline(&mut self) {
+        let current_line_number = self.content.char_to_line(self.cursor);
+        let eol = self.end_of_line(current_line_number);
+        self.content.insert_char(eol, '\n');
+        self.cached_highlighter.invalidate_from(current_line_number);
+        self.move_cursor_down(1);
     }
 
     pub fn insert_mode(&mut self) {
@@ -369,6 +390,10 @@ impl Buffer {
     pub fn normal_mode(&mut self) {
         if let InputMode::Insert = self.mode {
             self.mode = InputMode::Normal;
+            self.move_cursor(
+                self.cursor
+                    .min(self.end_of_line(self.content.char_to_line(self.cursor))),
+            );
         }
     }
 
@@ -381,18 +406,8 @@ impl Buffer {
     }
 
     pub fn get_selection_range(&self) -> Option<Range<usize>> {
-        match self.edit_mode {
-            EditMode::Char => self
-                .selection
-                .map(|selection| (selection.min(self.cursor)..selection.max(self.cursor))),
-            EditMode::Line => self.selection.map(|selection| {
-                let selected = self.content.char_to_line(selection);
-                let current = self.content.char_to_line(self.cursor);
-                let start = self.content.line_to_char(selected.min(current));
-                let end = self.end_of_line(selected.max(current));
-                start..end
-            }),
-        }
+        self.selection
+            .map(|selection| (selection.min(self.cursor)..selection.max(self.cursor)))
     }
 
     pub fn move_cursor_bol(&mut self) {
@@ -437,12 +452,13 @@ impl Buffer {
 
     /// will return last char position if line_number >= self.content.len_lines()
     fn end_of_line(&self, line_number: usize) -> usize {
+        let off_one = (self.mode != InputMode::Insert) as usize;
         if let Some(line) = self.get_line(line_number) {
             let beginning_of_line = self.content.line_to_char(line_number);
-            let trimmed = line.trim_end();
-            beginning_of_line + trimmed.len().saturating_sub(1)
+            let trimmed = line.replace("\n", "");
+            beginning_of_line + trimmed.len().saturating_sub(off_one)
         } else {
-            self.content.len_chars().saturating_sub(2)
+            self.content.len_chars().saturating_sub(1 + off_one)
         }
     }
 
@@ -458,23 +474,20 @@ impl Buffer {
     pub fn move_cursor_down(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let current_line_offset = self.cursor - self.content.line_to_char(current_line_number);
-        let dest_line_number = self
-            .content
-            .len_lines()
-            .saturating_sub(1)
-            .min(current_line_number + n);
+        let dest_line_number = self.content.len_lines().min(current_line_number + n);
         // find the furthest line that's non-empty
         for line_number in (current_line_number..=dest_line_number).rev() {
             if self.get_line(line_number).is_some() {
                 let dest_cursor =
                     self.content.line_to_char(line_number) + current_line_offset.max(self.last_col);
-                self.move_cursor(dest_cursor.min(self.end_of_line(dest_line_number)));
+                self.move_cursor(dest_cursor.min(self.end_of_line(line_number)));
                 return;
             }
         }
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
+        let cursor = cursor.clamp(0, self.content.len_chars().saturating_sub(1));
         let dest_line_number = self.content.char_to_line(cursor);
         if dest_line_number < self.window.start {
             let offset = self.window.start - dest_line_number; // at least 1
@@ -484,7 +497,7 @@ impl Buffer {
             let offset = dest_line_number - self.window.end + 1; // at least 1
             self.window = (self.window.start + offset)..(self.window.end + offset);
         }
-        self.cursor = cursor.min(self.content.len_chars().saturating_sub(1));
+        self.cursor = cursor;
     }
 
     pub fn page_up(&mut self, n: usize) {
@@ -497,41 +510,35 @@ impl Buffer {
         self.move_cursor_down((height / 2) * n);
     }
 
-    pub fn delete(&mut self, n: usize) {
-        match self.edit_mode {
-            EditMode::Line => self.delete_lines(n),
-            EditMode::Char => self.delete_chars(n),
-        }
-    }
-
     pub fn delete_lines(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let start = self.content.line_to_char(current_line_number);
         let end_line_number = self.content.len_lines().min(current_line_number + n);
         let end = self.content.line_to_char(end_line_number);
         self.content.remove(start..end);
-        self.move_cursor(start);
+        let last_line_number = self.content.len_lines().saturating_sub(2);
+        let line_number = current_line_number.min(last_line_number);
+        self.move_cursor(
+            self.end_of_line(line_number)
+                .min(self.content.line_to_char(line_number) + self.last_col),
+        );
         self.cached_highlighter.invalidate_from(current_line_number);
     }
 
     pub fn delete_chars(&mut self, n: usize) {
-        let end = self.content.len_chars().min(self.cursor + n);
-        self.content.remove(self.cursor..end);
-        let line_number = self.content.char_to_line(self.cursor);
-        self.cached_highlighter.invalidate_from(line_number);
+        if self.content.len_chars() > 0 {
+            let current_line_number = self.content.char_to_line(self.cursor);
+            let end = (self.end_of_line(current_line_number) + 1).min(self.cursor + n);
+            self.content.remove(self.cursor..end);
+            self.move_cursor(self.cursor.min(self.end_of_line(current_line_number)));
+            self.cached_highlighter.invalidate_from(current_line_number);
+        }
     }
 
     pub fn back_delete_char(&mut self) {
         if self.cursor > 0 {
-            self.move_cursor(self.cursor.saturating_sub(1));
+            self.move_cursor_left(1);
             self.delete_chars(1);
-        }
-    }
-
-    pub fn cycle_submode(&mut self) {
-        self.edit_mode = match self.edit_mode {
-            EditMode::Char => EditMode::Line,
-            EditMode::Line => EditMode::Char,
         }
     }
 

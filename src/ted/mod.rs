@@ -42,9 +42,10 @@ fn format_space_chain(space_chain: &str) -> String {
 pub struct Ted {
     term: TTerm,
     buffers: Buffers,
-    minibuffer: Buffer,
     exit: bool,
     prompt: String,
+    answer: String,
+    message: String,
     space_chain: String,
     commands: Commands,
     prompt_callback: Option<fn(&mut Ted, String)>,
@@ -67,9 +68,10 @@ impl Ted {
         Ted {
             term: terminal,
             buffers: Buffers::home(syntax_set.clone(), theme_set.clone()),
-            minibuffer: Buffer::empty(syntax_set.clone(), theme_set.clone()),
             exit: false,
             prompt: String::default(),
+            answer: String::default(),
+            message: String::default(),
             space_chain: String::default(),
             commands: Commands::default(),
             prompt_callback: None,
@@ -87,16 +89,15 @@ impl Ted {
         let (_, line_number, column_number) = buffer.get_cursor();
         let status_line_number = size.height.saturating_sub(2) as usize;
         buffer.resize_window(status_line_number);
-        let line = self.minibuffer.get_current_line().unwrap_or_default();
         let window = buffer.get_window();
         let (echo_line, cursor_x, cursor_y) = if self.prompt.is_empty() {
             (
-                line,
+                self.message.clone(),
                 column_number as u16,
                 (line_number - window.start) as u16,
             )
         } else {
-            let line = format!("{}: {}", self.prompt, line);
+            let line = format!("{}: {}", self.prompt, self.answer);
             let n = line.len();
             (line, n as u16, size.height.saturating_sub(1))
         };
@@ -117,14 +118,13 @@ impl Ted {
     fn new_buffer(&mut self, content: String) {
         let _ = self.term.clear();
         let name = format!("Buffer #{}", self.buffers.len() + 1);
-        let message = format!("Created new buffer <{}>", name);
+        self.message = format!("Created new buffer <{}>", name);
         self.buffers.new_buffer(Buffer::new(
             content,
             name,
             self.syntax_set.clone(),
             self.theme_set.clone(),
         ));
-        self.minibuffer.set_current_line(message);
     }
 
     fn run_command(&mut self, command: String) {
@@ -132,14 +132,14 @@ impl Ted {
         if let Some(command) = self.commands.get_by_name(&command) {
             command.get_action()(self);
         } else {
-            self.minibuffer.set_current_line(err);
+            self.message = err;
         }
     }
 
     pub fn file_open(&mut self, filepath: String) {
         let _ = self.term.clear();
         let buffer = Buffer::from_file(&filepath, self.syntax_set.clone(), self.theme_set.clone());
-        let message = match buffer {
+        self.message = match buffer {
             Ok(buffer) => {
                 let message = format!("Created new buffer <{}>", buffer.name);
                 self.buffers.new_buffer(buffer);
@@ -147,15 +147,13 @@ impl Ted {
             }
             Err(err) => format!("file_open({}): {}", filepath, err.to_string()),
         };
-        self.minibuffer.set_current_line(message);
     }
 
     fn file_save(&mut self) {
-        let msg = match self.buffers.focused_mut().overwrite_backend_file() {
+        self.message = match self.buffers.focused_mut().overwrite_backend_file() {
             Ok(_) => String::from("File saved"),
             Err(e) => e.to_string(),
         };
-        self.minibuffer.set_current_line(msg);
     }
 
     fn next_buffer(&mut self) {
@@ -163,8 +161,7 @@ impl Ted {
             let _ = self.term.clear();
             self.buffers.cycle_next();
             // self.buffers.focused_mut().dirty = true;
-            let message = format!("Switched to <{}>", self.buffers.focused().name);
-            self.minibuffer.set_current_line(message);
+            self.message = format!("Switched to <{}>", self.buffers.focused().name);
         }
     }
 
@@ -181,14 +178,12 @@ impl Ted {
     fn prompt_mode(&mut self, prompt: String, f: fn(&mut Ted, String)) {
         self.prompt = prompt;
         self.prompt_callback = Some(f);
-        self.minibuffer.mode = InputMode::Insert;
-        self.minibuffer.set_current_line(String::default());
         execute!(io::stdout(), SetCursorShape(CursorShape::Line)).unwrap();
     }
 
     fn space_mode(&mut self) {
-        self.space_chain = String::from(" ");
-        self.minibuffer.set_current_line("SPC-".to_string());
+        self.space_chain = " ".to_string();
+        self.message = "SPC-".to_string();
     }
 
     fn format_space_chain(&self, completed: bool) -> String {
@@ -198,8 +193,7 @@ impl Ted {
     }
 
     fn print_space_chain(&mut self, completed: bool) {
-        self.minibuffer
-            .set_current_line(self.format_space_chain(completed));
+        self.message = self.format_space_chain(completed);
     }
 
     // returns wether the user asked to exit
@@ -208,7 +202,7 @@ impl Ted {
             match key.code {
                 KeyCode::Esc => {
                     self.normal_mode();
-                    self.space_chain = String::default();
+                    self.space_chain.clear();
                 }
                 KeyCode::Char(c) => self.space_chain.push(c),
                 KeyCode::Tab => self.space_chain.push('\t'),
@@ -218,40 +212,39 @@ impl Ted {
             match commands.len() {
                 0 => {
                     self.normal_mode();
-                    self.minibuffer.set_current_line(format!(
-                        "{:?} is undefined",
-                        self.format_space_chain(true)
-                    ));
-                    self.space_chain = String::default();
+                    self.message = format!("{:?} is undefined", self.format_space_chain(true));
+                    self.space_chain.clear();
                 }
                 1 if commands[0].chain_is(&self.space_chain) => {
                     let f = commands[0].get_action();
                     self.print_space_chain(true);
                     f(self);
                     self.normal_mode();
-                    self.space_chain = String::default();
+                    self.space_chain.clear();
                 }
                 _ => self.print_space_chain(false),
             }
         } else if !self.prompt.is_empty() {
             match key.code {
                 KeyCode::Enter => {
-                    let line = self.minibuffer.get_current_line().unwrap();
                     self.normal_mode();
-                    self.prompt = String::default();
+                    self.prompt.clear();
                     if let Some(f) = self.prompt_callback {
                         self.prompt_callback = None;
-                        f(self, line);
+                        f(self, self.answer.clone());
                     }
+                    self.answer.clear();
                 }
                 KeyCode::Esc => {
                     self.normal_mode();
-                    self.prompt = String::default();
                     self.prompt_callback = None;
-                    self.minibuffer.set_current_line(String::default());
+                    self.prompt.clear();
+                    self.answer.clear();
                 }
-                KeyCode::Backspace => self.minibuffer.back_delete_char(),
-                KeyCode::Char(c) => self.minibuffer.insert_char(c),
+                KeyCode::Backspace => {
+                    let _ = self.answer.pop();
+                }
+                KeyCode::Char(c) => self.answer.push(c),
                 _ => {}
             };
         } else {
@@ -259,10 +252,9 @@ impl Ted {
                 InputMode::Normal => {
                     match key.code {
                         KeyCode::Char(c) => self.normal_mode_handle_key(c),
-                        KeyCode::Tab => self.buffers.focused_mut().cycle_submode(),
                         KeyCode::Esc => {
                             self.universal_argument = None;
-                            self.minibuffer.set_current_line("ESC".to_string());
+                            self.message = "ESC".to_string();
                             self.buffers.focused_mut().remove_selection();
                         }
                         _ => {}
@@ -308,8 +300,7 @@ impl Ted {
 
     fn set_lang(&mut self, name: String) {
         if !self.buffers.focused_mut().set_language(&name) {
-            let msg = format!("Could not load lang {}", name);
-            self.minibuffer.set_current_line(msg);
+            self.message = format!("Could not load lang {}", name);
         }
     }
 
@@ -337,8 +328,7 @@ impl Ted {
 
     fn set_theme(&mut self, name: String) {
         if !self.buffers.focused_mut().set_theme(&name) {
-            let msg = format!("Could not load theme {}", name);
-            self.minibuffer.set_current_line(msg);
+            self.message = format!("Could not load theme {}", name);
         }
     }
 
@@ -349,6 +339,26 @@ impl Ted {
         match c {
             ' ' => self.space_mode(),
             'i' => self.insert_mode(),
+            'I' => {
+                self.insert_mode();
+                self.buffers.focused_mut().move_cursor_bol();
+            }
+            'a' => {
+                self.insert_mode();
+                self.buffers.focused_mut().move_cursor_right(1);
+            }
+            'A' => {
+                self.insert_mode();
+                self.buffers.focused_mut().move_cursor_eol();
+            }
+            'o' => {
+                self.insert_mode();
+                self.buffers.focused_mut().append_newline();
+            }
+            'O' => {
+                self.insert_mode();
+                self.buffers.focused_mut().prepend_newline();
+            }
             'h' => self.buffers.focused_mut().move_cursor_left(n),
             'H' => self.buffers.focused_mut().move_cursor_bol(),
             'k' => self.buffers.focused_mut().move_cursor_up(n),
@@ -358,7 +368,8 @@ impl Ted {
             'l' => self.buffers.focused_mut().move_cursor_right(n),
             'L' => self.buffers.focused_mut().move_cursor_eol(),
             's' => self.buffers.focused_mut().mark_selection(),
-            'd' => self.buffers.focused_mut().delete(n),
+            'D' => self.buffers.focused_mut().delete_lines(n),
+            'd' => self.buffers.focused_mut().delete_chars(n),
             'p' => self.buffers.focused_mut().paste(n, &self.clipboard),
             'c' => todo!(), // copy
             'u' => todo!(), // undo
@@ -370,7 +381,7 @@ impl Ted {
                 if let Some(u) = c.to_digit(10) {
                     let x = current * 10 + u as usize;
                     self.universal_argument = Some(x);
-                    self.minibuffer.set_current_line(format!("C-u: {}", x));
+                    self.message = format!("C-u: {}", x);
                 }
             }
             _ => {}
