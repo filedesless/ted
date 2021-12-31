@@ -1,4 +1,5 @@
-use buffer::{Buffer, BufferWidget, InputMode};
+use crate::ted::buffer_widget::BufferWidget;
+use buffer::{Buffer, InputMode};
 use buffers::Buffers;
 use command::Commands;
 use config::Config;
@@ -20,6 +21,7 @@ use tui::widgets::Paragraph;
 use tui::Terminal;
 
 mod buffer;
+mod buffer_widget;
 mod buffers;
 mod cached_highlighter;
 mod command;
