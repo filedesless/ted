@@ -49,20 +49,24 @@ const HELP: &str = r#"# Welcome to Ted
 
 In this mode keystrokes have a special meaning, mostly mimicking vim.
 
-- Press `SPC q` to quit ted
-- Press `SPC` to enter commands by chain
+- `SPC q` to quit ted
+- `SPC` to enter commands by chain
 
 ### Moving the cursor
 
-- Use `h, j, k, l` keys to move your cursor around in normal mode
-- Use `J, K` keys to move a page up or down
-- Use `H, L` keys to move beginning or end of line
+- `h, j, k, l` to move your cursor around in normal mode
+- `J, K` to move a page up or down
+- `H, L` to move beginning or end of line
 
-###  Enter INSERT mode with one of the following keys
+### Enter INSERT mode
 
-- Use `i, I` keys to insert under cursor or at beginning of line
-- Use `a, A` keys to append under cursor or at end of line
-- Use `o, O` keys to append newline under or above current line
+- `i, I` to insert under cursor or at beginning of line
+- `a, A` to append under cursor or at end of line
+- `o, O` to append newline under or above current line
+
+### Edit the buffer
+
+- `d, D` to delete the character or line under cursor
 
 ## INSERT mode
 
@@ -96,13 +100,13 @@ impl Buffer {
         let mut message = String::from(HELP);
         for command in Commands::default().commands {
             let line = format!(
-                "- {} `{}`: {}\n",
-                command.name,
+                "- `{}` ({}): {}\n",
                 command
                     .chain
                     .as_ref()
                     .map(|chain| format_space_chain(chain))
                     .unwrap_or_else(|| "unbound".to_string()),
+                command.name,
                 command.desc
             );
             message.push_str(&line);
