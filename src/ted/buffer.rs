@@ -450,7 +450,7 @@ impl Buffer {
 
     pub fn back_delete_char(&mut self) {
         if self.cursor > 0 {
-            self.move_cursor_left(1);
+            self.move_cursor(self.cursor - 1);
             self.delete_chars(1);
         }
     }
