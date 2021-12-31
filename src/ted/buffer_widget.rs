@@ -32,12 +32,15 @@ impl StatefulWidget for BufferWidget {
             Lines::Plain(lines) => lines
                 .iter()
                 .cloned()
-                .map(|line| vec![(default_style, line)])
+                .map(|line| {
+                    let n = line.len();
+                    (line, vec![(default_style, 0..n)])
+                })
                 .collect(),
         };
 
         for y in 0..status_line_number {
-            if let Some(line) = lines.get(y as usize) {
+            if let Some((line, ranges)) = lines.get(y as usize) {
                 let window = state.get_window();
                 if y == (line_number - window.start) as u16 {
                     if let Some(color) = state
@@ -52,13 +55,14 @@ impl StatefulWidget for BufferWidget {
                     }
                 }
                 let spans = Spans::from(
-                    line.iter()
-                        .map(|(style, s)| {
+                    ranges
+                        .iter()
+                        .map(|(style, r)| {
                             Span::styled(
                                 if state.get_config().show_whitespace {
-                                    s.replace("\n", "¶")
+                                    line[r.clone()].replace("\n", "¶")
                                 } else {
-                                    s.to_string()
+                                    line[r.clone()].to_string()
                                 },
                                 Style::default().fg(Color::Rgb(
                                     style.foreground.r,

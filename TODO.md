@@ -6,7 +6,9 @@
 - [ ] line numbering
 - [ ] rework event loop to be non-blocking
 - [ ] make highlighting async
+  * using rayon? (https://github.com/nikomatsakis/rayon)
 - [ ] jump mode to naviguate
+- [ ] fuzzy completions for commands/files/themes/...
   - [x] don't have to re-highlight everything on every change to the buffer  (https://github.com/trishume/syntect#caching)
 - [-] visual mode
   - [~] highlight selected text

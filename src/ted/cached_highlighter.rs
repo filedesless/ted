@@ -12,7 +12,7 @@ const STEP: usize = 1000;
 
 type State = (ParseState, HighlightState);
 
-type Line = Vec<(Style, String)>;
+type Line = (String, Vec<(Style, Range<usize>)>);
 
 pub struct CachedHighlighter {
     pub syntax: SyntaxReference,
@@ -84,11 +84,11 @@ impl CachedHighlighter {
                 }
                 let s = String::from(line);
                 let changes = parse_state.parse_line(&s, &self.config.syntax_set);
-                let ranges: Vec<(Style, String)> =
-                    HighlightIterator::new(&mut highlight_state, &changes, &s, &highlighter)
-                        .map(|(style, s)| (style, String::from(s)))
+                let ranges: Vec<(Style, Range<usize>)> =
+                    RangedHighlightIterator::new(&mut highlight_state, &changes, &s, &highlighter)
+                        .map(|(style, _, r)| (style, r))
                         .collect();
-                self.highlighted_lines.push(ranges)
+                self.highlighted_lines.push((s, ranges))
             }
             self.highlighted_lines[range.start..].to_vec()
         }

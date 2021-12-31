@@ -37,8 +37,9 @@ pub enum InputMode {
     Insert,
 }
 
+type HighlightedLine = (String, Vec<(syntect::highlighting::Style, Range<usize>)>);
 pub enum Lines {
-    Highlighted(Vec<Vec<(syntect::highlighting::Style, String)>>),
+    Highlighted(Vec<HighlightedLine>),
     Plain(Vec<String>),
 }
 
