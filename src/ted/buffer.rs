@@ -10,8 +10,6 @@ use std::ops::Range;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::SystemTime;
-use syntect::highlighting::Theme;
-use syntect::parsing::SyntaxReference;
 use tui::layout::Rect;
 use tui::style::Color;
 use tui::style::Style;
@@ -30,10 +28,8 @@ pub struct Buffer {
     cursor: usize, // 0..content.len_chars()
     last_col: usize,
     selection: Option<usize>,
-    syntax: SyntaxReference,
-    theme: Theme,
     config: Rc<Config>,
-    cached_highlighter: CachedHighlighter,
+    highlighter: Option<CachedHighlighter>,
 }
 
 pub struct BufferWidget {}
@@ -44,12 +40,34 @@ impl StatefulWidget for BufferWidget {
         let (cursor, line_number, column_number) = state.get_cursor();
         let status_line_number = area.height.saturating_sub(1);
 
-        let lines = state.get_highlighted_lines();
         // draw lines from buffer
+        let default_style = syntect::highlighting::Style {
+            foreground: syntect::highlighting::Color::WHITE,
+            background: syntect::highlighting::Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0xff,
+            },
+            font_style: syntect::highlighting::FontStyle::default(),
+        };
+        let lines = match state.get_visible_lines() {
+            Lines::Highlighted(lines) => lines,
+            Lines::Plain(lines) => lines
+                .iter()
+                .cloned()
+                .map(|line| vec![(default_style, line)])
+                .collect(),
+        };
+
         for y in 0..status_line_number {
             if let Some(line) = lines.get(y as usize) {
                 if y == (line_number - state.window.start) as u16 {
-                    if let Some(color) = state.theme.settings.line_highlight {
+                    if let Some(color) = state
+                        .highlighter
+                        .as_ref()
+                        .and_then(|h| h.theme.settings.line_highlight)
+                    {
                         buf.set_style(
                             Rect::new(0, y, area.width, 1),
                             Style::default().bg(Color::Rgb(color.r, color.g, color.b)),
@@ -95,8 +113,16 @@ impl StatefulWidget for BufferWidget {
             column_number,
             state.window.start,
             state.window.end,
-            state.get_syntax().name,
-            state.get_theme(),
+            state
+                .highlighter
+                .as_ref()
+                .map(|cached| &cached.syntax.name)
+                .unwrap_or(&"None".to_string()),
+            state
+                .highlighter
+                .as_ref()
+                .and_then(|cached| cached.theme.name.as_ref())
+                .unwrap_or(&"None".to_string()),
         );
         buf.set_string(0, status_line_number, line, Style::default());
     }
@@ -111,6 +137,11 @@ pub struct BackendFile {
 pub enum InputMode {
     Normal,
     Insert,
+}
+
+pub enum Lines {
+    Highlighted(Vec<Vec<(syntect::highlighting::Style, String)>>),
+    Plain(Vec<String>),
 }
 
 const HELP: &str = r#"# Welcome to Ted
@@ -147,21 +178,10 @@ Enter chains starting with `SPC` to run the following commands
 impl Buffer {
     /// Basic in-memory buffer
     pub fn new(content: String, name: String, config: Rc<Config>) -> Self {
-        let theme = config
-            .theme_set
-            .themes
-            .get(DEFAULT_THEME)
-            .cloned()
-            .unwrap_or_default();
-        let syntax = config.syntax_set.find_syntax_plain_text().clone();
         Self {
             mode: InputMode::Normal,
             content: Rope::from(content),
-            cached_highlighter: CachedHighlighter::new(
-                syntax.clone(),
-                theme.clone(),
-                config.clone(),
-            ),
+            highlighter: None,
             config,
             cursor: 0,
             last_col: 0,
@@ -169,8 +189,6 @@ impl Buffer {
             file: None,
             selection: None,
             window: 0..1,
-            syntax,
-            theme,
         }
     }
 
@@ -226,10 +244,14 @@ impl Buffer {
                 .syntax_set
                 .find_syntax_by_first_line(&line.to_string())
         });
-        if let Some(syntax) = from_line.or(from_ext) {
-            buffer.syntax = syntax.clone();
-            buffer.cached_highlighter =
-                CachedHighlighter::new(syntax.clone(), buffer.theme.clone(), config);
+        if let Some(syntax) = from_line.or(from_ext).cloned() {
+            let theme = config
+                .theme_set
+                .themes
+                .get(DEFAULT_THEME)
+                .cloned()
+                .unwrap_or_default();
+            buffer.highlighter = Some(CachedHighlighter::new(syntax, theme, config));
         }
         Ok(buffer)
     }
@@ -264,48 +286,47 @@ impl Buffer {
         None
     }
 
-    pub fn get_syntax(&self) -> &SyntaxReference {
-        &self.syntax
-    }
-
     pub fn set_language(&mut self, language: &str) -> bool {
         if let Some(syntax) = self.config.syntax_set.find_syntax_by_name(language) {
-            self.syntax = syntax.clone();
-            self.cached_highlighter = CachedHighlighter::new(
-                self.syntax.clone(),
-                self.theme.clone(),
+            self.highlighter = Some(CachedHighlighter::new(
+                syntax.clone(),
+                self.config
+                    .theme_set
+                    .themes
+                    .get(DEFAULT_THEME)
+                    .cloned()
+                    .unwrap_or_default(),
                 self.config.clone(),
-            );
+            ));
             return true;
         }
         false
     }
 
-    pub fn get_theme(&self) -> String {
-        self.theme
-            .name
-            .as_ref()
-            .unwrap_or(&DEFAULT_THEME.to_string())
-            .to_string()
-    }
-
     pub fn set_theme(&mut self, name: &str) -> bool {
-        if let Some(theme) = self.config.theme_set.themes.get(name) {
-            self.theme = theme.clone();
-            self.cached_highlighter = CachedHighlighter::new(
-                self.syntax.clone(),
-                self.theme.clone(),
-                self.config.clone(),
-            );
-            return true;
+        if let Some(cached) = self.highlighter.as_mut() {
+            if let Some(theme) = self.config.theme_set.themes.get(name).cloned() {
+                cached.set_theme(theme);
+                return true;
+            }
         }
         false
     }
 
     /// returns highlighted lines within the view range
-    pub fn get_highlighted_lines(&mut self) -> Vec<Vec<(syntect::highlighting::Style, String)>> {
-        self.cached_highlighter
-            .get_highlighted_lines(self.content.clone(), self.window.clone())
+    pub fn get_visible_lines(&mut self) -> Lines {
+        if let Some(cached) = self.highlighter.as_mut() {
+            Lines::Highlighted(
+                cached.get_highlighted_lines(self.content.clone(), self.window.clone()),
+            )
+        } else {
+            Lines::Plain(
+                self.content
+                    .get_lines_at(self.window.start)
+                    .map(|lines| lines.take(self.window.len()).map(String::from).collect())
+                    .unwrap_or_else(Vec::new),
+            )
+        }
     }
 
     pub fn resize_window(&mut self, height: usize) {
@@ -336,7 +357,9 @@ impl Buffer {
     pub fn insert_char(&mut self, c: char) {
         self.content.insert_char(self.cursor, c);
         let line_number = self.content.char_to_line(self.cursor);
-        self.cached_highlighter.invalidate_from(line_number);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(line_number)
+        }
         self.move_cursor(self.cursor + 1);
     }
 
@@ -344,7 +367,9 @@ impl Buffer {
         let current_line_number = self.content.char_to_line(self.cursor);
         let bol = self.content.line_to_char(current_line_number);
         self.content.insert_char(bol, '\n');
-        self.cached_highlighter.invalidate_from(current_line_number);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(current_line_number)
+        }
         if self.cursor != bol {
             self.move_cursor_up(1);
         }
@@ -354,7 +379,9 @@ impl Buffer {
         let current_line_number = self.content.char_to_line(self.cursor);
         let eol = self.end_of_line(current_line_number);
         self.content.insert_char(eol, '\n');
-        self.cached_highlighter.invalidate_from(current_line_number);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(current_line_number)
+        }
         self.move_cursor_down(1);
     }
 
@@ -497,7 +524,9 @@ impl Buffer {
             self.end_of_line(line_number)
                 .min(self.content.line_to_char(line_number) + self.last_col),
         );
-        self.cached_highlighter.invalidate_from(current_line_number);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(current_line_number)
+        }
     }
 
     pub fn delete_chars(&mut self, n: usize) {
@@ -506,7 +535,9 @@ impl Buffer {
             let end = (self.end_of_line(current_line_number) + 1).min(self.cursor + n);
             self.content.remove(self.cursor..end);
             self.move_cursor(self.cursor.min(self.end_of_line(current_line_number)));
-            self.cached_highlighter.invalidate_from(current_line_number);
+            if let Some(cached) = self.highlighter.as_mut() {
+                cached.invalidate_from(current_line_number)
+            }
         }
     }
 
@@ -522,7 +553,9 @@ impl Buffer {
             self.content.insert(self.cursor, text);
         }
         let line_number = self.content.char_to_line(self.cursor);
-        self.cached_highlighter.invalidate_from(line_number);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(line_number)
+        }
     }
 }
 

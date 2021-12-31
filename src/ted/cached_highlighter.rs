@@ -15,10 +15,10 @@ type State = (ParseState, HighlightState);
 type Line = Vec<(Style, String)>;
 
 pub struct CachedHighlighter {
+    pub syntax: SyntaxReference,
+    pub theme: Theme,
     highlighted_lines: Vec<Line>,
-    syntax: SyntaxReference,
     config: Rc<Config>,
-    theme: Theme,
     /// (line_number => states) before parsing the line
     cache: BTreeMap<usize, State>,
 }
@@ -53,6 +53,11 @@ impl CachedHighlighter {
     pub fn invalidate_from(&mut self, line_number: usize) {
         self.highlighted_lines.truncate(line_number);
         self.cache.retain(|k, _| k < &line_number);
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        self.invalidate_from(0);
     }
 
     /// returns up to range.len() lines
