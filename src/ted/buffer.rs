@@ -47,12 +47,14 @@ const HELP: &str = r#"# Welcome to Ted
 
 ## NORMAL mode
 
-In this mode keystrokes have a special meaning, mostly mimicking vim.
+In this mode keystrokes have a special meaning, strongly inspired by vim.
 
 - `SPC q` to quit ted
 - `SPC` to enter commands by chain
 
 ### Moving the cursor
+
+These commands can be prefixed with a number to repeat the operation many times.
 
 - `h, j, k, l` to move your cursor around in normal mode
 - `J, K` to move a page up or down
@@ -60,17 +62,19 @@ In this mode keystrokes have a special meaning, mostly mimicking vim.
 
 ### Enter INSERT mode
 
+From INSERT mode, keystrokes are sent directly to the buffer to edit its content. Return to NORMAL mode by pressing `ESC` or `Ctrl-c`
+
 - `i, I` to insert under cursor or at beginning of line
-- `a, A` to append under cursor or at end of line
+- `a, A` to append after cursor or at end of line
 - `o, O` to append newline under or above current line
 
 ### Edit the buffer
 
+These commands can be prefixed with a number to repeat the operation many times.
+
 - `d, D` to delete the character or line under cursor
-
-## INSERT mode
-
-In this mode keystrokes are inserted in the buffer, press `ESC` to go back to normal mode
+- `c, C` to copy the character or line under cursor
+- `p, P` to paste the character or line under cursor
 
 ## SPACE chains
 
@@ -187,6 +191,16 @@ impl Buffer {
             }
         }
         None
+    }
+
+    pub fn get_lines(&self, range: Range<usize>) -> Option<String> {
+        self.content
+            .get_lines_at(range.start)
+            .map(|lines| lines.take(range.len()).map(String::from).collect())
+    }
+
+    pub fn get_current_line(&self) -> Option<String> {
+        self.get_line(self.content.char_to_line(self.cursor))
     }
 
     pub fn set_language(&mut self, language: &str) -> bool {
@@ -459,14 +473,31 @@ impl Buffer {
         }
     }
 
-    pub fn paste(&mut self, n: usize, text: &str) {
-        for _ in 0..n {
-            self.content.insert(self.cursor, text);
+    /// paste given text n times at given position
+    pub fn paste(&mut self, pos: usize, n: usize, text: &str) {
+        if text.is_empty() {
+            return;
         }
-        let line_number = self.content.char_to_line(self.cursor);
+
+        for _ in 0..n {
+            self.content.insert(pos, text);
+        }
+        let line_number = self.content.char_to_line(pos);
         if let Some(cached) = self.highlighter.as_mut() {
             cached.invalidate_from(line_number)
         }
+    }
+
+    /// paste given text n times under cursor
+    pub fn paste_chars(&mut self, n: usize, text: &str) {
+        self.paste(self.cursor, n, text);
+    }
+
+    /// paste given text n times under current line
+    pub fn paste_lines(&mut self, n: usize, text: &str) {
+        let line_number = self.content.char_to_line(self.cursor);
+        let pos = self.content.line_to_char(line_number + 1);
+        self.paste(pos, n, text);
     }
 }
 

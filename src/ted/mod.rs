@@ -320,6 +320,26 @@ impl Ted {
         }
     }
 
+    /// copies up to n characters from the current line (at the current cursor position) into the clipboard
+    fn copy_chars(&mut self, n: usize) {
+        let buffer = self.buffers.focused_mut();
+        if let Some(chars) = buffer
+            .get_current_line()
+            .and_then(|line| line.get(0..n.min(line.len())).map(String::from))
+        {
+            self.clipboard = chars;
+        }
+    }
+
+    /// copies up to n lines from the current line into the clipboard
+    fn copy_lines(&mut self, n: usize) {
+        let buffer = self.buffers.focused();
+        let (_, line_number, _) = buffer.get_cursor();
+        if let Some(lines) = buffer.get_lines(line_number..line_number + n) {
+            self.clipboard = lines;
+        }
+    }
+
     fn normal_mode_handle_key(&mut self, c: char) {
         let uarg = self.universal_argument;
         self.universal_argument = None;
@@ -355,11 +375,13 @@ impl Ted {
             'J' => self.buffers.focused_mut().page_down(n),
             'l' => self.buffers.focused_mut().move_cursor_right(n),
             'L' => self.buffers.focused_mut().move_cursor_eol(),
-            's' => self.buffers.focused_mut().mark_selection(),
-            'D' => self.buffers.focused_mut().delete_lines(n),
             'd' => self.buffers.focused_mut().delete_chars(n),
-            'p' => self.buffers.focused_mut().paste(n, &self.clipboard),
-            'c' => todo!(), // copy
+            'D' => self.buffers.focused_mut().delete_lines(n),
+            'c' => self.copy_chars(n),
+            'C' => self.copy_lines(n),
+            'p' => self.buffers.focused_mut().paste_chars(n, &self.clipboard),
+            'P' => self.buffers.focused_mut().paste_lines(n, &self.clipboard),
+            's' => self.buffers.focused_mut().mark_selection(),
             'u' => todo!(), // undo
             'r' => todo!(), // redo
             'f' => todo!(), // find
