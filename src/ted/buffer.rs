@@ -37,50 +37,18 @@ pub enum InputMode {
     Insert,
 }
 
+pub enum Selection {
+    Lines(usize),
+    Chars(usize),
+}
+
 type HighlightedLine = (String, Vec<(syntect::highlighting::Style, Range<usize>)>);
 pub enum Lines {
     Highlighted(Vec<HighlightedLine>),
     Plain(Vec<String>),
 }
 
-const HELP: &str = r#"# Welcome to Ted
-
-## NORMAL mode
-
-In this mode keystrokes have a special meaning, strongly inspired by vim.
-
-- `SPC q` to quit ted
-- `SPC` to enter commands by chain
-
-### Moving the cursor
-
-These commands can be prefixed with a number to repeat the operation many times.
-
-- `h, j, k, l` to move your cursor around in normal mode
-- `J, K` to move a page up or down
-- `H, L` to move beginning or end of line
-
-### Enter INSERT mode
-
-From INSERT mode, keystrokes are sent directly to the buffer to edit its content. Return to NORMAL mode by pressing `ESC` or `Ctrl-c`
-
-- `i, I` to insert under cursor or at beginning of line
-- `a, A` to append after cursor or at end of line
-- `o, O` to append newline under or above current line
-
-### Edit the buffer
-
-These commands can be prefixed with a number to repeat the operation many times.
-
-- `d, D` to delete the character or line under cursor
-- `c, C` to copy the character or line under cursor
-- `p, P` to paste the character or line under cursor
-
-## SPACE chains
-
-Enter chains starting with `SPC` to run the following commands
-
-"#;
+const HELP: &str = include_str!("../../assets/HELP.md");
 
 impl Buffer {
     /// Basic in-memory buffer
