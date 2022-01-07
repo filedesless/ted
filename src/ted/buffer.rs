@@ -522,10 +522,23 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+    static mut CONFIG: Option<Rc<Config>> = None;
+
+    fn init() -> Rc<Config> {
+        unsafe {
+            INIT.call_once(|| {
+                CONFIG = Some(Rc::new(Config::default()));
+            });
+            CONFIG.clone().unwrap()
+        }
+    }
 
     #[test]
     fn end_of_line() {
-        let config = Rc::new(Config::default());
+        let config = init();
         // empty line defaults to first char, even if there's none
         let buffer = Buffer::new(String::from(""), String::from(""), config.clone());
         assert_eq!(buffer.end_of_line(0), 0);
@@ -546,7 +559,7 @@ mod tests {
 
     #[test]
     fn get_line() {
-        let config = Rc::new(Config::default());
+        let config = init();
 
         let buffer = Buffer::new(String::from(""), String::from(""), config.clone());
         assert_eq!(buffer.get_line(0).map(String::from), None);
@@ -572,7 +585,7 @@ mod tests {
 
     #[test]
     fn delete_line_out_of_bounds() {
-        let config = Rc::new(Config::default());
+        let config = init();
         let mut buffer = Buffer::new(String::from(""), String::from(""), config);
         buffer.delete_lines(1000);
         assert_eq!(buffer.get_line(0), None);
@@ -580,7 +593,7 @@ mod tests {
 
     #[test]
     fn delete_char_out_of_bounds() {
-        let config = Rc::new(Config::default());
+        let config = init();
         let mut buffer = Buffer::new(String::from(""), String::from(""), config);
         buffer.delete_chars(1000);
     }
