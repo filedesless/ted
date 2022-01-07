@@ -323,7 +323,10 @@ impl Ted {
     /// copies up to n characters from the current line (at the current cursor position) into the clipboard
     fn copy_chars(&mut self, n: usize) {
         let buffer = self.buffers.focused_mut();
-        if let Some(chars) = buffer
+        if let Some(selection) = buffer.get_selection() {
+            self.clipboard = selection;
+            buffer.remove_selection();
+        } else if let Some(chars) = buffer
             .get_current_line()
             .and_then(|line| line.get(0..n.min(line.len())).map(String::from))
         {
@@ -333,9 +336,12 @@ impl Ted {
 
     /// copies up to n lines from the current line into the clipboard
     fn copy_lines(&mut self, n: usize) {
-        let buffer = self.buffers.focused();
+        let buffer = self.buffers.focused_mut();
         let (_, line_number, _) = buffer.get_cursor();
-        if let Some(lines) = buffer.get_lines(line_number..line_number + n) {
+        if let Some(selection) = buffer.get_selection() {
+            self.clipboard = selection;
+            buffer.remove_selection();
+        } else if let Some(lines) = buffer.get_lines(line_number..line_number + n) {
             self.clipboard = lines;
         }
     }
@@ -381,7 +387,8 @@ impl Ted {
             'C' => self.copy_lines(n),
             'p' => self.buffers.focused_mut().paste_chars(n, &self.clipboard),
             'P' => self.buffers.focused_mut().paste_lines(n, &self.clipboard),
-            's' => self.buffers.focused_mut().mark_selection(),
+            'v' => self.buffers.focused_mut().select_chars(),
+            'V' => self.buffers.focused_mut().select_lines(),
             'u' => todo!(), // undo
             'r' => todo!(), // redo
             'f' => todo!(), // find

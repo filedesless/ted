@@ -1,5 +1,6 @@
 use crate::ted::buffer::InputMode;
 use crate::ted::buffer::Lines;
+use crate::ted::buffer::Selection;
 use crate::ted::Buffer;
 use tui::layout::Rect;
 use tui::style::Color;
@@ -38,11 +39,11 @@ impl StatefulWidget for BufferWidget {
                 })
                 .collect(),
         };
+        let selection = state.get_selection_coords();
 
         for y in 0..status_line_number {
             if let Some((line, ranges)) = lines.get(y as usize) {
-                let window = state.get_window();
-                if y == (line_number - window.start) as u16 {
+                if y == (line_number - state.get_window().start) as u16 && selection.is_none() {
                     if let Some(color) = state
                         .get_highlighter()
                         .as_ref()
@@ -78,6 +79,21 @@ impl StatefulWidget for BufferWidget {
                 buf.set_string(0, y, "~", Style::default());
             }
         }
+
+        // show selected text
+        if let Some(selected) = state.get_selection_coords() {
+            if let Some(color) = state
+                .get_highlighter()
+                .as_ref()
+                .and_then(|h| h.theme.settings.selection)
+            {
+                for &(x, y) in &selected {
+                    buf.get_mut(x, y)
+                        .set_bg(Color::Rgb(color.r, color.g, color.b));
+                }
+            }
+        }
+
         // draw status line
         let status = match state.mode {
             InputMode::Normal => "NORMAL MODE",

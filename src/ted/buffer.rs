@@ -21,7 +21,7 @@ pub struct Buffer {
     content: Rope,
     cursor: usize, // 0..content.len_chars()
     last_col: usize,
-    selection: Option<usize>,
+    selection: Option<Selection>,
     config: Rc<Config>,
     highlighter: Option<CachedHighlighter>,
 }
@@ -292,17 +292,61 @@ impl Buffer {
         }
     }
 
-    pub fn mark_selection(&mut self) {
-        self.selection = Some(self.cursor);
+    pub fn select_chars(&mut self) {
+        self.selection = Some(Selection::Chars(self.cursor));
+    }
+
+    pub fn select_lines(&mut self) {
+        let line_number = self.content.char_to_line(self.cursor);
+        self.selection = Some(Selection::Lines(line_number));
     }
 
     pub fn remove_selection(&mut self) {
         self.selection = None;
     }
 
+    pub fn get_selection(&self) -> Option<String> {
+        self.get_selection_range()
+            .and_then(|selection| self.content.get_slice(selection))
+            .map(String::from)
+    }
+
+    /// get the range of selected character position
     pub fn get_selection_range(&self) -> Option<Range<usize>> {
-        self.selection
-            .map(|selection| (selection.min(self.cursor)..selection.max(self.cursor)))
+        match self.selection {
+            Some(Selection::Chars(pos)) => Some(pos.min(self.cursor)..pos.max(self.cursor) + 1),
+            Some(Selection::Lines(line_number)) => {
+                let current_line_number = self.content.char_to_line(self.cursor);
+                let lower = self
+                    .content
+                    .line_to_char(line_number.min(current_line_number));
+                let upper = self
+                    .content
+                    .line_to_char(line_number.max(current_line_number) + 1);
+                Some(lower..upper)
+            }
+            _ => None,
+        }
+    }
+
+    /// get the screen positions of selected characters
+    pub fn get_selection_coords(&self) -> Option<Vec<(u16, u16)>> {
+        if let Some(range) = self.get_selection_range() {
+            let mut v = vec![];
+            for y in self.window.clone() {
+                if let Some(line) = self.get_line(y) {
+                    let bol = self.content.line_to_char(y);
+                    for x in 0..line.len() {
+                        if range.contains(&(bol + x)) {
+                            v.push((x as u16, (y - self.window.start) as u16));
+                        }
+                    }
+                }
+            }
+            return Some(v);
+        }
+
+        None
     }
 
     pub fn move_cursor_bol(&mut self) {
@@ -310,7 +354,6 @@ impl Buffer {
         let dest_cursor = self.content.line_to_char(current_line);
         if dest_cursor != self.cursor {
             self.move_cursor(dest_cursor);
-            self.last_col = self.cursor - self.content.line_to_char(current_line);
         }
     }
 
@@ -319,7 +362,6 @@ impl Buffer {
         let dest_cursor = self.end_of_line(current_line);
         if dest_cursor != self.cursor {
             self.move_cursor(dest_cursor);
-            self.last_col = self.cursor - self.content.line_to_char(current_line);
         }
     }
 
@@ -332,7 +374,6 @@ impl Buffer {
             .max(self.cursor.saturating_sub(n));
         if dest_cursor != self.cursor {
             self.move_cursor(dest_cursor);
-            self.last_col = self.cursor - self.content.line_to_char(line_number);
         }
     }
 
@@ -341,7 +382,6 @@ impl Buffer {
         let dest_cursor = self.end_of_line(line_number).min(self.cursor + n);
         if dest_cursor != self.cursor {
             self.move_cursor(dest_cursor);
-            self.last_col = self.cursor - self.content.line_to_char(line_number);
         }
     }
 
@@ -392,6 +432,7 @@ impl Buffer {
             let offset = dest_line_number - self.window.end + 1; // at least 1
             self.window = (self.window.start + offset)..(self.window.end + offset);
         }
+        self.last_col = cursor - self.content.line_to_char(dest_line_number);
         self.cursor = cursor;
     }
 
@@ -405,32 +446,35 @@ impl Buffer {
         self.move_cursor_down((height / 2) * n);
     }
 
+    fn delete_range(&mut self, range: Range<usize>) {
+        self.content.remove(range.clone());
+        let last_line_number = self.content.len_lines().saturating_sub(2);
+        let line_number = self.content.char_to_line(range.start).min(last_line_number);
+        self.move_cursor(range.start);
+        if let Some(cached) = self.highlighter.as_mut() {
+            cached.invalidate_from(line_number)
+        }
+    }
+
+    /// delete up to n lines from the current line
     pub fn delete_lines(&mut self, n: usize) {
         let current_line_number = self.content.char_to_line(self.cursor);
         let start = self.content.line_to_char(current_line_number);
         let end_line_number = self.content.len_lines().min(current_line_number + n);
         let end = self.content.line_to_char(end_line_number);
-        self.content.remove(start..end);
-        let last_line_number = self.content.len_lines().saturating_sub(2);
-        let line_number = current_line_number.min(last_line_number);
-        self.move_cursor(
-            self.end_of_line(line_number)
-                .min(self.content.line_to_char(line_number) + self.last_col),
-        );
-        if let Some(cached) = self.highlighter.as_mut() {
-            cached.invalidate_from(current_line_number)
-        }
+        let range = self.get_selection_range().unwrap_or(start..end);
+        self.remove_selection();
+        self.delete_range(range);
     }
 
+    /// delete up to n characters from the current line
     pub fn delete_chars(&mut self, n: usize) {
         if self.content.len_chars() > 0 {
             let current_line_number = self.content.char_to_line(self.cursor);
             let end = (self.end_of_line(current_line_number) + 1).min(self.cursor + n);
-            self.content.remove(self.cursor..end);
-            self.move_cursor(self.cursor.min(self.end_of_line(current_line_number)));
-            if let Some(cached) = self.highlighter.as_mut() {
-                cached.invalidate_from(current_line_number)
-            }
+            let range = self.get_selection_range().unwrap_or(self.cursor..end);
+            self.remove_selection();
+            self.delete_range(range);
         }
     }
 
@@ -442,7 +486,7 @@ impl Buffer {
     }
 
     /// paste given text n times at given position
-    pub fn paste(&mut self, pos: usize, n: usize, text: &str) {
+    fn paste(&mut self, pos: usize, n: usize, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -464,7 +508,13 @@ impl Buffer {
     /// paste given text n times under current line
     pub fn paste_lines(&mut self, n: usize, text: &str) {
         let line_number = self.content.char_to_line(self.cursor);
-        let pos = self.content.line_to_char(line_number + 1);
+        let mut pos = self.content.line_to_char(line_number + 1);
+        if let Some(line) = self.get_line(line_number) {
+            if !line.ends_with('\n') {
+                self.content.insert(pos, "\n");
+                pos += 1;
+            }
+        }
         self.paste(pos, n, text);
     }
 }
