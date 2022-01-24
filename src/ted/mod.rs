@@ -381,6 +381,8 @@ impl Ted {
             'J' => self.buffers.focused_mut().page_down(n),
             'l' => self.buffers.focused_mut().move_cursor_right(n),
             'L' => self.buffers.focused_mut().move_cursor_eol(),
+            'w' => self.buffers.focused_mut().move_cursor_next_word(n),
+            'e' => self.buffers.focused_mut().move_cursor_end_of_word(n),
             'd' => self.buffers.focused_mut().delete_chars(n),
             'D' => self.buffers.focused_mut().delete_lines(n),
             'c' => self.copy_chars(n),

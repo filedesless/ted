@@ -9,11 +9,11 @@
   * using rayon? (https://github.com/nikomatsakis/rayon)
 - [ ] jump mode to naviguate
 - [ ] fuzzy completions for commands/files/themes/...
-  - [x] don't have to re-highlight everything on every change to the buffer  (https://github.com/trishume/syntect#caching)
+- [x] don't have to re-highlight everything on every change to the buffer (https://github.com/trishume/syntect#caching)
 - [-] visual mode
   - [~] highlight selected text
     - died when integrating syntect
-  - [ ] re-implement commands to work on selected text
+  - [x] re-implement commands to work on selected text
 - [x] remember last col when being moved to left because line too short
 - [x] highlight current line
   - [x] gotta rework buffer redraw

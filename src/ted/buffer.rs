@@ -2,6 +2,7 @@ use super::Commands;
 use crate::ted::cached_highlighter::CachedHighlighter;
 use crate::ted::format_space_chain;
 use crate::ted::Config;
+use ropey::iter::Chars;
 use ropey::Rope;
 use std::fs::File;
 use std::io;
@@ -49,6 +50,37 @@ pub enum Lines {
 }
 
 const HELP: &str = include_str!("../../assets/HELP.md");
+
+/// returns the offset to the beginning of the next nth word
+fn get_next_word_offset(chars: &mut Chars, n: usize) -> Option<usize> {
+    chars.next().map(|char_under_cursor| {
+        let mut offset = 0;
+        for _ in 0..n {
+            if !char_under_cursor.is_whitespace() {
+                if let Some(end_of_word) = chars.position(char::is_whitespace) {
+                    offset += end_of_word + 1;
+                }
+            }
+            if let Some(dist_to_word) = chars.position(|c| !c.is_whitespace()) {
+                offset += dist_to_word + 1;
+            }
+        }
+        offset
+    })
+}
+
+fn get_next_word_end_offset(chars: &mut Chars, n: usize) -> Option<usize> {
+    let mut offset = 0;
+    if let Some(true) = chars.peekable().peek().map(|c| !c.is_whitespace()) {
+        if let Some(start_of_word) = get_next_word_offset(chars, 1) {
+            offset += start_of_word;
+        }
+    }
+    if let Some(dist_to_word) = chars.position(char::is_whitespace) {
+        offset += dist_to_word;
+    }
+    Some(offset)
+}
 
 impl Buffer {
     /// Basic in-memory buffer
@@ -421,8 +453,27 @@ impl Buffer {
         }
     }
 
+    pub fn move_cursor_next_word(&mut self, n: usize) {
+        if let Some(mut chars) = self.content.get_chars_at(self.cursor) {
+            if let Some(pos) = get_next_word_offset(&mut chars, n) {
+                self.move_cursor(self.cursor + pos);
+            }
+        }
+    }
+
+    pub fn move_cursor_prev_word(&mut self, n: usize) {}
+
+    pub fn move_cursor_end_of_word(&mut self, n: usize) {
+        if let Some(mut chars) = self.content.get_chars_at(self.cursor) {
+            if let Some(pos) = get_next_word_end_offset(&mut chars, n) {
+                self.move_cursor(self.cursor + pos);
+            }
+        }
+    }
+
     pub fn move_cursor(&mut self, cursor: usize) {
-        let cursor = cursor.clamp(0, self.content.len_chars().saturating_sub(1));
+        let from_end = if self.mode == InputMode::Insert { 1 } else { 2 };
+        let cursor = cursor.clamp(0, self.content.len_chars().saturating_sub(from_end));
         let dest_line_number = self.content.char_to_line(cursor);
         if dest_line_number < self.window.start {
             let offset = self.window.start - dest_line_number; // at least 1
@@ -596,5 +647,22 @@ mod tests {
         let config = init();
         let mut buffer = Buffer::new(String::from(""), String::from(""), config);
         buffer.delete_chars(1000);
+    }
+
+    const TEST_SENTENCE_1: &str = "The quick brown fox jumps over the lazy dog";
+    const TEST_SENTENCE_2: &str = "  \n\n  The   quick   brown   fox     jumps over the lazy dog";
+
+    #[test]
+    fn test_get_next_word_offset() {
+        let words = Rope::from(TEST_SENTENCE_1);
+        assert_eq!(Some(4), get_next_word_offset(&mut words.chars(), 1));
+        assert_eq!(Some(10), get_next_word_offset(&mut words.chars(), 2));
+        assert_eq!(Some(16), get_next_word_offset(&mut words.chars(), 3));
+        assert_eq!(Some(3), get_next_word_offset(&mut words.chars_at(1), 1));
+        assert_eq!(Some(9), get_next_word_offset(&mut words.chars_at(1), 2));
+        let words = Rope::from(TEST_SENTENCE_2);
+        assert_eq!(Some(6), get_next_word_offset(&mut words.chars(), 1));
+        assert_eq!(Some(12), get_next_word_offset(&mut words.chars(), 2));
+        assert_eq!(Some(20), get_next_word_offset(&mut words.chars(), 3));
     }
 }
